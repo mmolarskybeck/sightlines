@@ -1,6 +1,11 @@
 import { useMemo } from "react";
 import type { Texture } from "three";
 import type { FloorObject3d } from "../../../domain/geometry/scene3d";
+import {
+  assemblyPlanRect,
+  supportedTotalHeightMm,
+  type ResolvedFloorSupport
+} from "../../../domain/geometry/supportGlyphs";
 import { textureNativeAspect } from "./artworkFit";
 import { mmToWorld } from "./coordinates";
 import {
@@ -21,7 +26,13 @@ import {
   SelectionBoxOutline,
   SelectionRectOutline
 } from "./UncertaintyOutline";
-import { BLOCKED_ZONE_COLOR, BOX_COLOR } from "./tokens";
+import {
+  BLOCKED_ZONE_COLOR,
+  BOX_COLOR,
+  CASE_BODY_COLOR,
+  CASE_GLASS_COLOR,
+  CASE_GLASS_OPACITY
+} from "./tokens";
 
 // Planning annotation, not physical (spec §5.3) — same subdued grey family
 // as the 2D blocked-zone hatch, as a translucent wash.
@@ -38,6 +49,105 @@ const BLOCKED_ZONE_OUTLINE_LIFT_MM = 2;
 // Outset of the selection outline from the rect it wraps, total across both
 // sides. The same 20mm every other selected thing in the 3D view wears.
 const SELECTION_OUTLINE_OUTSET_MM = 20;
+
+// The bonnet's glass, identical to the vitrine cap's in CaseMesh.tsx: one glass
+// language across the app (the 2D glyphs share CASE_GLASS_THICKNESS_MM for the
+// same reason). Restated locally rather than exported from CaseMesh — neither
+// file should have to import the other's render internals.
+const GLASS_MATERIAL_PROPS = {
+  color: CASE_GLASS_COLOR,
+  transparent: true,
+  opacity: CASE_GLASS_OPACITY,
+  depthWrite: false
+} as const;
+
+// Everything the mesh layer needs to stand a work on its support, in mm, in the
+// placement's OWN (yawed) frame — so the whole assembly rides inside the one
+// rotation the box group already applies and nothing here has to know about
+// angles. Null for an object with no support, which then draws exactly what it
+// drew before supports existed.
+//
+// Axes: local x is the placement's width, local z its depth. The support's
+// stored offsets are in the plan's rotated local frame (x along width, y toward
+// the front face), and planRotationToYaw maps plan +y onto world +z, so
+// offsetYMm IS the local z — no sign flip, the yaw carries it.
+export type FloorSupportLayoutMm = {
+  // Center heights for the three boxes. The work's bottom edge is the support's
+  // TOP FACE — that is what a support means, and baseHeightMm is ignored under
+  // one (the same rule cases and monitors already follow), so this SUPERSEDES
+  // suspendedCenterYMm rather than adding to it.
+  supportCenterYMm: number;
+  supportHeightMm: number;
+  workCenterYMm: number;
+  // The plexi bonnet, absent when there is none. One optional object rather
+  // than two optional numbers so "there is a bonnet" is a single fact the
+  // render site can narrow on.
+  bonnet?: { centerYMm: number; heightMm: number };
+  // Support/bonnet footprint and its local offset from the work's center.
+  supportWidthMm: number;
+  supportDepthMm: number;
+  supportOffsetXMm: number;
+  supportOffsetZMm: number;
+  // The union of work and support footprints, and the assembly's full height:
+  // what the selection outline wraps, because the thing selected is the
+  // installation, not the sculpture balanced on top of it.
+  assemblyWidthMm: number;
+  assemblyDepthMm: number;
+  assemblyHeightMm: number;
+  assemblyOffsetXMm: number;
+  assemblyOffsetZMm: number;
+  assemblyCenterYMm: number;
+};
+
+export function floorSupportLayoutMm(
+  object: Pick<FloorObject3d, "widthMm" | "depthMm" | "heightMm"> & {
+    support?: ResolvedFloorSupport;
+  }
+): FloorSupportLayoutMm | null {
+  const support = object.support;
+  if (!support) return null;
+
+  // assemblyPlanRect against a placement parked at the origin at 0° returns the
+  // union IN THE LOCAL FRAME: its center is the union's offset from the work's
+  // center and its size is the union's size. Calling the domain helper this way
+  // rather than un-rotating its floor-space answer keeps the union rule in one
+  // place (supportGlyphs.ts) and this file free of trig.
+  const localAssembly = assemblyPlanRect(
+    {
+      xMm: 0,
+      yMm: 0,
+      widthMm: object.widthMm,
+      depthMm: object.depthMm,
+      rotationDeg: 0
+    },
+    support
+  );
+  const assemblyHeightMm = supportedTotalHeightMm(object, support);
+
+  return {
+    supportCenterYMm: support.heightMm / 2,
+    supportHeightMm: support.heightMm,
+    workCenterYMm: support.heightMm + object.heightMm / 2,
+    ...(support.bonnetHeightMm !== undefined
+      ? {
+          bonnet: {
+            centerYMm: support.heightMm + support.bonnetHeightMm / 2,
+            heightMm: support.bonnetHeightMm
+          }
+        }
+      : {}),
+    supportWidthMm: support.widthMm,
+    supportDepthMm: support.depthMm,
+    supportOffsetXMm: support.offsetXMm ?? 0,
+    supportOffsetZMm: support.offsetYMm ?? 0,
+    assemblyWidthMm: localAssembly.widthMm,
+    assemblyDepthMm: localAssembly.depthMm,
+    assemblyHeightMm,
+    assemblyOffsetXMm: localAssembly.centerXMm,
+    assemblyOffsetZMm: localAssembly.centerYMm,
+    assemblyCenterYMm: assemblyHeightMm / 2
+  };
+}
 
 // One floor-placed object: a neutral artwork box carrying the work's image on
 // the faces the curator chose (ArtworkFloorObject.imageFaces — front + back by
@@ -154,15 +264,60 @@ export function FloorObjectBox({
   );
 
   const height = mmToWorld(object.heightMm);
+  // The pedestal/plinth under this work, if any — footprint, offsets, bonnet and
+  // the assembly union all resolved in mm-space (floorSupportLayoutMm above).
+  const support = floorSupportLayoutMm(object);
+  // This group's origin is the WORK BOX's center, so every sub-mesh below is
+  // positioned relative to it: a height in mm above the floor becomes a local
+  // offset by subtracting the work center's own height. Keeping the origin where
+  // it already was is what lets the image panels, the uncertainty outline and
+  // the suspension wires stay untouched.
+  const localYMm = (heightAboveFloorMm: number) =>
+    heightAboveFloorMm - (support ? support.workCenterYMm : 0);
   // The box is center-anchored, so its center rides at bottom edge + half the
   // height. With no baseHeightMm that is heightMm / 2 exactly as before —
   // halving is exact in binary floating point either side of the mm->world
   // scale, so a floor-resting box lands on the identical world y it always did.
+  //
+  // A SUPPORT SUPERSEDES that: the work's bottom edge is the support's top face
+  // and baseHeightMm is ignored under one (the same rule cases and monitors
+  // follow), so a stale suspension height left on a work that was later stood on
+  // a plinth must not lift it off its own pedestal.
   return (
     <group
-      position={[x, mmToWorld(suspendedCenterYMm(object)), z]}
+      position={[
+        x,
+        mmToWorld(support ? support.workCenterYMm : suspendedCenterYMm(object)),
+        z
+      ]}
       rotation={[0, yaw, 0]}
     >
+      {/* The support block: white gallery furniture of the same family as a
+          vitrine's body (CASE_BODY_COLOR), Lambert like every other volume, and
+          carrying the SAME pointer handlers as the work above it — clicking,
+          pressing or hovering the pedestal acts on the placement, because the
+          assembly is one installation and not two objects. */}
+      {support ? (
+        <mesh
+          position={[
+            mmToWorld(support.supportOffsetXMm),
+            mmToWorld(localYMm(support.supportCenterYMm)),
+            mmToWorld(support.supportOffsetZMm)
+          ]}
+          {...pointerProps}
+          onPointerOver={onPointerOver}
+          onPointerOut={onPointerOut}
+        >
+          <boxGeometry
+            args={[
+              mmToWorld(support.supportWidthMm),
+              mmToWorld(support.supportHeightMm),
+              mmToWorld(support.supportDepthMm)
+            ]}
+          />
+          <meshLambertMaterial color={CASE_BODY_COLOR} />
+        </mesh>
+      ) : null}
       <mesh
         {...pointerProps}
         onPointerOver={onPointerOver}
@@ -219,6 +374,38 @@ export function FloorObjectBox({
           <meshBasicMaterial map={texture} toneMapped={false} transparent alphaTest={0.01} />
         </mesh>
       ))}
+      {/* The plexi bonnet: a glass box at the SUPPORT's footprint (bonnet
+          footprint = support footprint, USER DECISION 2026-09-17) rising from
+          the support's top face, in the same glass the vitrine cap uses. Drawn
+          after the work and its image so the transparent material composites
+          over them. Pointer handlers like every other sub-mesh — a curator
+          clicking the glass has clicked the installation.
+
+          A LOCKED bonnet may be SHORTER than the work it covers (the normaliser
+          warns rather than growing it); the work box is then simply taller than
+          the glass and pokes out of its top, which is exactly the collision the
+          inspector is warning about and must be visible here. */}
+      {support?.bonnet ? (
+        <mesh
+          position={[
+            mmToWorld(support.supportOffsetXMm),
+            mmToWorld(localYMm(support.bonnet.centerYMm)),
+            mmToWorld(support.supportOffsetZMm)
+          ]}
+          {...pointerProps}
+          onPointerOver={onPointerOver}
+          onPointerOut={onPointerOut}
+        >
+          <boxGeometry
+            args={[
+              mmToWorld(support.supportWidthMm),
+              mmToWorld(support.bonnet.heightMm),
+              mmToWorld(support.supportDepthMm)
+            ]}
+          />
+          <meshLambertMaterial {...GLASS_MATERIAL_PROPS} />
+        </mesh>
+      ) : null}
       {isUncertain(object.status) ? (
         <DashedBoxOutline
           widthMm={object.widthMm}
@@ -227,7 +414,25 @@ export function FloorObjectBox({
           status={object.status}
         />
       ) : null}
-      {isSelected ? (
+      {/* One outline around the WHOLE assembly when there is a support — the
+          thing that got selected is the installation, not the sculpture
+          balanced on top of it (the same call CrtMonitorMesh makes about its
+          pedestal). Off a support this is unchanged: the box's own outline. */}
+      {isSelected && support ? (
+        <group
+          position={[
+            mmToWorld(support.assemblyOffsetXMm),
+            mmToWorld(localYMm(support.assemblyCenterYMm)),
+            mmToWorld(support.assemblyOffsetZMm)
+          ]}
+        >
+          <SelectionBoxOutline
+            widthMm={support.assemblyWidthMm + SELECTION_OUTLINE_OUTSET_MM}
+            heightMm={support.assemblyHeightMm + SELECTION_OUTLINE_OUTSET_MM}
+            depthMm={support.assemblyDepthMm + SELECTION_OUTLINE_OUTSET_MM}
+          />
+        </group>
+      ) : isSelected ? (
         <SelectionBoxOutline
           widthMm={object.widthMm + SELECTION_OUTLINE_OUTSET_MM}
           heightMm={object.heightMm + SELECTION_OUTLINE_OUTSET_MM}
@@ -237,8 +442,13 @@ export function FloorObjectBox({
       {/* Inside the yawed group on purpose: the wires attach to the board's
           top corners, so the same rotation that turns the box has to turn
           them. `fromLocalYMm` is the box's half-height because this group's
-          origin is the box CENTER, not its top. */}
-      {wires ? (
+          origin is the box CENTER, not its top.
+
+          Withheld under a support: a support and suspension are mutually
+          exclusive states (a support puts the bottom edge on its top face and
+          ignores baseHeightMm), so a stale suspension height on a work that was
+          later stood on a plinth must not sprout wires from a pedestal. */}
+      {wires && !support ? (
         <SuspensionWires plan={wires} fromLocalYMm={object.heightMm / 2} />
       ) : null}
     </group>

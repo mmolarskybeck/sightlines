@@ -29,6 +29,7 @@ export type ElevationDimensionModelInput = {
   visibleFloorCaseGhosts: ElevationScene["floorCaseGhosts"];
   visibleSuspendedArtworkGhosts: ElevationScene["suspendedArtworkGhosts"];
   visibleMonitorGhosts: ElevationScene["monitorGhosts"];
+  visibleSupportedArtworkGhosts: ElevationScene["supportedArtworkGhosts"];
   partitionNeighborShims: WallObjectBase[];
   wallId?: string;
   wallLengthMm: number;
@@ -52,6 +53,7 @@ export function buildElevationDimensionModel({
   visibleFloorCaseGhosts,
   visibleSuspendedArtworkGhosts,
   visibleMonitorGhosts,
+  visibleSupportedArtworkGhosts,
   partitionNeighborShims,
   wallId,
   wallLengthMm,
@@ -107,12 +109,45 @@ export function buildElevationDimensionModel({
     })),
     // A monitor bounds a gap line for the floor case's exact reason — it is
     // waist-to-eye-height equipment a curator hangs work above and beside. Its
-    // extent is the WHOLE assembly (pedestal + cabinet), standing on the floor,
-    // because that is the volume a dimension has to stop at.
+    // extent is the WHOLE assembly (plinth + whatever rises off it, across the
+    // union of cabinet and plinth spans), standing on the floor, because that
+    // is the volume a dimension has to stop at.
+    //
+    // "Whatever rises off it" is the max of the cabinet and the bonnet, the
+    // same rule the supported-artwork branch below states: a derived bonnet is
+    // always taller than what it covers, a LOCKED one may be shorter (USER
+    // DECISION 2026-09-17). Both spans collapse to the cabinet's for the
+    // monitor default, so no legacy monitor's dimensions move.
     ...visibleMonitorGhosts.map((ghost) => {
-      const totalHeightMm = ghost.pedestalHeightMm + ghost.monitorHeightMm;
+      const totalHeightMm =
+        ghost.pedestalHeightMm +
+        Math.max(ghost.monitorHeightMm, ghost.bonnetHeightMm ?? 0);
+      const xMinMm = Math.min(ghost.xMinMm, ghost.supportXMinMm);
+      const xMaxMm = Math.max(ghost.xMaxMm, ghost.supportXMaxMm);
       return {
         id: ghost.object.id,
+        wallId: wallId ?? "",
+        xMm: (xMinMm + xMaxMm) / 2,
+        yMm: totalHeightMm / 2,
+        widthMm: xMaxMm - xMinMm,
+        heightMm: totalHeightMm
+      };
+    }),
+    // A work standing on a pedestal or plinth bounds a gap line for the floor
+    // case's and the monitor's exact reason: it is a waist-to-eye-height volume
+    // standing against this wall, and a dimension running past it would
+    // describe space the curator can't use. Its extent is the WHOLE assembly
+    // (support + whatever rises off it), standing on the floor.
+    //
+    // "Whatever rises off it" is the max of the work and the bonnet, not the
+    // work: a derived bonnet is always taller than the work it covers, while a
+    // LOCKED one may be shorter (USER DECISION 2026-09-17). Same rule
+    // supportedTotalHeightMm states on the model side.
+    ...visibleSupportedArtworkGhosts.map((ghost) => {
+      const totalHeightMm =
+        ghost.supportHeightMm + Math.max(ghost.workHeightMm, ghost.bonnetHeightMm ?? 0);
+      return {
+        id: ghost.objectId,
         wallId: wallId ?? "",
         xMm: (ghost.xMinMm + ghost.xMaxMm) / 2,
         yMm: totalHeightMm / 2,

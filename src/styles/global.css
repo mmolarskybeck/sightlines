@@ -2122,7 +2122,8 @@ body.panels-resizing * {
   min-height: 32px;
 }
 
-.room-rename-form {
+.room-rename-form,
+.wall-rename-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 32px 32px;
   align-items: center;
@@ -2130,12 +2131,34 @@ body.panels-resizing * {
   width: 100%;
 }
 
-.room-rename-form input {
+.room-rename-form input,
+.wall-rename-form input {
   width: 100%;
   min-height: 32px;
   padding: var(--space-6) var(--space-8);
   font-size: var(--type-sm);
   font-weight: var(--weight-semibold);
+}
+
+/* The wall row keeps its full-width navigate gesture; the rename and compass
+   actions dock beside it, in the same quiet register as the room heading's. */
+.wall-row-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.wall-row-item .wall-row {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wall-row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-4);
 }
 
 .room-dimensions {
@@ -2206,6 +2229,18 @@ body.panels-resizing * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A wall name is free text, so it is the part that yields: the length readout
+   and the Open tag keep their width, and a long name ellipsizes into whatever
+   is left. */
+.wall-row > span:first-of-type {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wall-row strong {
+  flex: 0 0 auto;
 }
 
 /* "Open" on a wall row. Same register as .checklist-tag — a quiet word between
@@ -5670,8 +5705,15 @@ body.panels-resizing * {
   line-height: var(--leading-ui);
 }
 
+/* A wall name is free text, so the chip must not grow across the canvas when
+   someone names a wall "Corridor beside the freight elevator". Same truncation
+   the switcher variant already uses for its wall line. */
 .surface-label strong {
+  max-width: 28ch;
+  overflow: hidden;
   font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The elevation chip doubles as a text-first wall switcher: the browser
@@ -8142,6 +8184,38 @@ body.panels-resizing * {
   opacity: 0.85;
 }
 
+/* The elevation shadow of a floor work STANDING ON a pedestal or plinth
+   (ElevationSupportedArtworkGhost.tsx): support block on the floor line, the
+   work above it, an optional plexi bonnet over both. Same quiet dashed
+   vocabulary, weight and opacity as the floor-case, suspended-board and monitor
+   ghosts, and equally non-interactive — and kept as its own rule rather than
+   folded into a shared base for the same reason those three are separate, so
+   one ghost family can be tuned without silently restyling the others.
+   vector-effect is set per child in the component (it doesn't reliably inherit
+   from a group). */
+.elevation-supported-artwork-ghost {
+  fill: none;
+  stroke: var(--subtle);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 5;
+  opacity: 0.78;
+  pointer-events: none;
+}
+
+.elevation-supported-artwork-ghost rect {
+  fill: none;
+}
+
+/* Glass over the work: the finer, tighter dash the monitor ghost's screen and
+   the suspension wires wear, and for the same reason — it explains that there
+   is a cover without competing with the outlines a curator is aligning
+   against. */
+.elevation-supported-artwork-ghost .supported-artwork-ghost-bonnet {
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  opacity: 0.85;
+}
+
 /* A free-standing PARTITION projected onto this wall's elevation, in two tiers
    (ElevationPartitionProfile.tsx). Standing clear of the wall it is one more
    quiet dashed volume in front of it — the same vocabulary as the two ghosts
@@ -8353,6 +8427,62 @@ body.panels-resizing * {
 .plan-object.is-invalid .plan-object-mark {
   stroke: var(--danger);
   opacity: 1;
+}
+
+/* The pedestal / plinth a floor work STANDS ON (PlanObject.tsx's `support`,
+   resolved in mm-space by supportGlyphs.ts). Opaque like the outline it sits
+   under — a pedestal is a solid volume seen from above, not a floating
+   annotation — but a step LIGHTER in stroke, because the work on top is the
+   thing being read and the support is what carries it. Declared after the
+   outline family so these rules win on source order at equal specificity.
+
+   pointer-events:all deliberately, and only off a ghost: the support is part of
+   the same hit target as the work (one assembly, one placement), so clicking
+   the reveal around a sculpture selects and drags the sculpture. Same
+   ghost-exclusion reasoning as .plan-object-outline's rule — a more-specific
+   child rule would otherwise override a ghost group's pointer-events:none and
+   let a click-to-place click land on the preview under the pointer. */
+.plan-object-support {
+  fill: var(--surface-strong);
+  stroke: var(--muted);
+  stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+}
+
+.plan-object:not(.is-ghost) .plan-object-support {
+  pointer-events: all;
+}
+
+/* Dashed at the SAME footprint as the support (bonnet footprint = support
+   footprint, USER DECISION 2026-09-17): from above a plexi bonnet has no
+   outline of its own, so the dash is the whole of what says "there is glass
+   over this". Unfilled, so the support's own fill still reads through it. */
+.plan-object-support-bonnet {
+  fill: none;
+  stroke: var(--subtle);
+  stroke-width: 1.25;
+  stroke-dasharray: 5 4;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+/* Selection and refusal travel across the WHOLE assembly, matching the
+   outline/mark recolors above: selecting a sculpture on a plinth must not leave
+   the plinth looking unselected beside it. */
+.plan-object.is-selected .plan-object-support {
+  stroke: var(--selection);
+}
+
+.plan-object.is-selected .plan-object-support-bonnet {
+  stroke: var(--selection);
+}
+
+.plan-object.is-invalid .plan-object-support {
+  stroke: var(--danger);
+}
+
+.plan-object.is-invalid .plan-object-support-bonnet {
+  stroke: var(--danger);
 }
 
 .opening-connection-glyph {
@@ -9725,13 +9855,27 @@ button.import-conflict-headtext:hover .import-conflict-caret { color: var(--ink)
   opacity: 0.85;
 }
 
-/* The "On pedestal" switch in the artwork inspector (MonitorSupportField).
+/* The plexi bonnet over a cabinet on an explicit plinth: the same finer dash
+   the screen above takes, and for the same reason — it is glass, and it must
+   not compete with the volumes a curator is aligning against. Identical to
+   .supported-artwork-ghost-bonnet, stated here because the two ghost families
+   are deliberately styled apart. */
+.elevation-monitor-ghost .monitor-ghost-bonnet {
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  opacity: 0.85;
+}
+
+/* The floor-support switches in the artwork inspector ("Allow overhang" and
+   "Plexi bonnet" in FloorSupportFields). Inherited verbatim from the
+   .monitor-support-switch rules that dressed the old "On pedestal" switch,
+   whose question the "Stands on" select now asks (MonitorSupportField is gone).
    Track geometry, which the shared Switch primitive deliberately leaves to its
    consumers: the same 34×20 pill .settings-switch and .export-switch-control
    use, so the 14px thumb (inset 2px) sits with symmetric margins and the
    control reads identically in all three places. Without it the switch renders
    zero pixels tall. */
-.monitor-support-switch {
+.support-switch {
   align-self: center;
   width: 34px;
   height: 20px;
@@ -9740,13 +9884,49 @@ button.import-conflict-headtext:hover .import-conflict-caret { color: var(--ink)
   background: var(--surface-strong);
 }
 
-.monitor-support-switch[data-state="checked"] {
+.support-switch[data-state="checked"] {
   border-color: var(--primary);
   background: var(--primary);
 }
 
-.monitor-support-switch[data-state="checked"] .switch-thumb {
+.support-switch[data-state="checked"] .switch-thumb {
   transform: translateX(14px);
+}
+
+/* The support block's own fields sit in the same vertical rhythm as the
+   placement fields above them — no fill, no border: DESIGN.md keeps inspector
+   panels flat, and a card here would read as a second panel rather than more
+   of the same form. */
+.support-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+/* Bonnet height + its lock toggle on one line. The toggle aligns to the
+   field's INPUT, not to the row, so it sits level with the box it governs
+   rather than floating beside the label. */
+.support-bonnet-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-8);
+}
+
+.support-bonnet-row > .support-bonnet-height {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Muted while the height TRACKS the work: the number is derived, shown so the
+   curator can see how tall the glass is, and typing in it is what takes it
+   over (the store locks on a typed number). Colour only — the field stays
+   focusable and editable, which is the whole affordance. */
+.support-bonnet-height.derived input {
+  color: var(--muted-foreground);
+}
+
+.support-bonnet-fit {
+  align-self: flex-start;
 }
 
 /* ==========================================================================

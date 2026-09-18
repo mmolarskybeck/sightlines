@@ -111,7 +111,10 @@ export function rectPolyPoints(rect: PlanRect, xf: Transform): string {
     .join(" ");
 }
 
-function planObjectMarks(
+// Exported for test: the preview's per-object marks are the one place this card
+// could silently drift from the artifact it previews, so they are asserted
+// directly rather than through a rendered card.
+export function planObjectMarks(
   rect: PlanRect,
   kind: string,
   isFloor: boolean,
@@ -124,7 +127,10 @@ function planObjectMarks(
   // .doorSwing) — the same object the canvas and the PDF writer draw. Never
   // recomputed here: the preview drifting from the artifact it previews is
   // exactly the failure this module's shared-glyph rule exists to prevent.
-  swing?: DoorSwingPlanGlyph
+  swing?: DoorSwingPlanGlyph,
+  // The pedestal/plinth this floor placement stands on, off the same scene
+  // entry the canvas and the PDF writer read (PlanSceneFloorObject.support).
+  support?: { rect: PlanRect; hasBonnet: boolean }
 ): JSX.Element {
   const world = (xMm: number, yMm: number) =>
     xf.point(localToWorld(rect, xMm, yMm));
@@ -302,6 +308,28 @@ function planObjectMarks(
 
   return (
     <Fragment key={key}>
+      {/* The support first, beneath the work, so the work's own outline
+          overdraws the seam where the two meet — the canvas's and the PDF
+          writer's paint order. Lighter stroke than the object standing on it;
+          the bonnet is the same footprint, dashed, since a plan cannot show
+          its height (USER DECISION 2026-09-17). */}
+      {support ? (
+        <polygon
+          points={rectPolyPoints(support.rect, xf)}
+          fill={FILL_WEAK}
+          stroke={MUTED}
+          strokeWidth={0.55}
+        />
+      ) : null}
+      {support?.hasBonnet ? (
+        <polygon
+          points={rectPolyPoints(support.rect, xf)}
+          fill="none"
+          stroke={SUBTLE}
+          strokeWidth={0.5}
+          strokeDasharray="3 2"
+        />
+      ) : null}
       <polygon
         points={rectPolyPoints(rect, xf)}
         fill={kind === "blocked-zone" ? FILL_WEAK : "#ffffff"}
@@ -457,7 +485,9 @@ export function planPageMarks(
             true,
             isMonitorArtwork(painted.entry.artwork),
             xf,
-            `fobj-${i}`
+            `fobj-${i}`,
+            undefined,
+            painted.entry.support
           )
         );
       }

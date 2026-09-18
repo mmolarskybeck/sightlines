@@ -22,6 +22,7 @@ import type {
   SavedViewPose
 } from "../domain/project";
 import { isDegeneratePose, resolveSavedViewRoomLabel } from "../domain/savedViews";
+import { hasDefaultWallNames } from "../domain/geometry/createRoom";
 import { parseFaceWallId } from "../domain/geometry/freestandingWalls";
 import { readDropboxShareUrl } from "./cloud/dropboxShare";
 import { CLOUD_BACKUP_CONFIGURED } from "./cloud/configured";
@@ -196,6 +197,8 @@ export function App() {
   const moveFreestandingWallEndpoint = useAppStore((state) => state.moveFreestandingWallEndpoint);
   const deleteFreestandingWall = useAppStore((state) => state.deleteFreestandingWall);
   const renameRoom = useAppStore((state) => state.renameRoom);
+  const renameWall = useAppStore((state) => state.renameWall);
+  const setRoomNorthWall = useAppStore((state) => state.setRoomNorthWall);
   const deleteRoom = useAppStore((state) => state.deleteRoom);
   const restoreWall = useAppStore((state) => state.restoreWall);
   const setUnit = useAppStore((state) => state.setUnit);
@@ -871,6 +874,21 @@ export function App() {
     if (viewMode !== "3d") setViewMode("3d");
   };
 
+  // "Use as North wall" rewrites all four names. That is free when the room
+  // still carries its birth names, and destructive as soon as one was typed —
+  // so the confirm is raised only in the second case.
+  const requestSetNorthWall = (roomId: string, wallId: string) => {
+    const placement = project.floor.rooms.find(
+      (candidate) => candidate.roomId === roomId
+    );
+    if (!placement) return;
+    // Judged on the whole ordered pattern (hasDefaultWallNames), not name by
+    // name: a typed "Wall 12" or a duplicated "East wall" is a custom name.
+    if (!hasDefaultWallNames(placement.room.walls))
+      dialogs.open("setNorthWall", { roomId, wallId });
+    else void setRoomNorthWall(roomId, wallId);
+  };
+
   // Detect package vs. project JSON by zip magic, not file extension.
   const handleImportFile = async (file: File) => {
     const buffer = await file.arrayBuffer();
@@ -1044,9 +1062,11 @@ export function App() {
             onAddRectangleRoom={() => void addRectangleRoom()}
             onDeleteRoom={deleteRoom}
             onRenameRoom={renameRoom}
+            onRenameWall={renameWall}
             onResizeWall={resizeWall}
             // List navigation, not a canvas pick — see focusWallContext.
             onSelectWall={focusWallContext}
+            onSetNorthWall={requestSetNorthWall}
           />
         ) : visibleLeftPanel === "savedViews" ? (
           <SavedViewsPanel
@@ -1499,6 +1519,7 @@ export function App() {
           setInspectorSectionOpen={setInspectorSectionOpen}
           toggleReshapeRoom={toggleReshapeRoom}
           armDuplicatePartition={armDuplicatePartition}
+          requestSetNorthWall={requestSetNorthWall}
         />
         ) : null}
       </section>

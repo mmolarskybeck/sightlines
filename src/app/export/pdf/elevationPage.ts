@@ -366,7 +366,13 @@ export function drawElevationMonitorGhost(
   const glyph = monitorElevationGlyph({
     widthMm,
     monitorHeightMm: ghost.monitorHeightMm,
-    pedestalHeightMm: ghost.pedestalHeightMm
+    pedestalHeightMm: ghost.pedestalHeightMm,
+    // The plinth and the bonnet span the SUPPORT, not the cabinet — identical
+    // to the canvas twin, and identical to it for a legacy monitor too, whose
+    // default pedestal is sized to its own box.
+    pedestalXMm: ghost.supportXMinMm - ghost.xMinMm,
+    pedestalWidthMm: Math.max(0, ghost.supportXMaxMm - ghost.supportXMinMm),
+    bonnetHeightMm: ghost.bonnetHeightMm
   });
   const dash = {
     borderColor: COLORS.subtle,
@@ -410,6 +416,24 @@ export function drawElevationMonitorGhost(
         glyph.screen.heightMm
       ),
       ...dash
+    });
+  }
+  if (glyph.bonnet) {
+    // Glass gets the finer wire-weight dash, the same subordination the screen
+    // above and drawElevationSupportedArtworkGhost's bonnet take. A LOCKED
+    // bonnet shorter than its cabinet leaves the cabinet drawn straight through
+    // it — the print has to show the collision the inspector warns about.
+    page.drawRectangle({
+      ...elevationRect(
+        transform,
+        ghost.xMinMm + glyph.bonnet.xMm,
+        bottomMm(glyph.bonnet.yMm, glyph.bonnet.heightMm),
+        glyph.bonnet.widthMm,
+        glyph.bonnet.heightMm
+      ),
+      borderColor: COLORS.subtle,
+      borderWidth: GHOST_WIRE_WIDTH_PT,
+      borderDashArray: GHOST_WIRE_DASH
     });
   }
 }
@@ -465,6 +489,65 @@ export function drawElevationSuspendedArtworkGhost(
     borderWidth: GHOST_BORDER_WIDTH_PT,
     borderDashArray: GHOST_DASH
   });
+}
+
+// The elevation shadow of a floor work STANDING ON a pedestal or plinth — the
+// print twin of ElevationSupportedArtworkGhost.tsx, off the same scene entry.
+// Stands on the floor line like the case and monitor ghosts, and this module's
+// model space is already wall-local y-UP with the floor at 0 (see the caller
+// drawing the floor line at yMm=0), so each box's bottom edge is its own height
+// off the floor with no flip to apply — unlike the SVG-y-down canvas twin.
+//
+// TWO SPANS: xMin/xMax are the ASSEMBLY's extent (work ∪ support) and bound the
+// support block and the bonnet; workXMin/workXMax bound the work standing on
+// top. A locked bonnet may be SHORTER than the work, so the work rect is drawn
+// in full rather than clipped to the glass — the print has to show the same
+// collision the inspector warns about.
+export function drawElevationSupportedArtworkGhost(
+  page: PDFPage,
+  transform: ElevationTransform,
+  ghost: ElevationScene["supportedArtworkGhosts"][number]
+) {
+  // Support and bonnet across the SUPPORT's span (the assembly span can be
+  // wider when the work overhangs); the work across its own.
+  const supportWidthMm = Math.max(0, ghost.supportXMaxMm - ghost.supportXMinMm);
+  const workWidthMm = Math.max(0, ghost.workXMaxMm - ghost.workXMinMm);
+  const dash = {
+    borderColor: COLORS.subtle,
+    borderWidth: GHOST_BORDER_WIDTH_PT,
+    borderDashArray: GHOST_DASH
+  };
+
+  page.drawRectangle({
+    ...elevationRect(transform, ghost.supportXMinMm, 0, supportWidthMm, ghost.supportHeightMm),
+    ...dash
+  });
+  page.drawRectangle({
+    ...elevationRect(
+      transform,
+      ghost.workXMinMm,
+      ghost.supportHeightMm,
+      workWidthMm,
+      ghost.workHeightMm
+    ),
+    ...dash
+  });
+  if (ghost.bonnetHeightMm !== undefined) {
+    // Glass gets the finer wire-weight dash, the same subordination the
+    // monitor ghost's screen and the suspension wires take.
+    page.drawRectangle({
+      ...elevationRect(
+        transform,
+        ghost.supportXMinMm,
+        ghost.supportHeightMm,
+        supportWidthMm,
+        ghost.bonnetHeightMm
+      ),
+      borderColor: COLORS.subtle,
+      borderWidth: GHOST_WIRE_WIDTH_PT,
+      borderDashArray: GHOST_WIRE_DASH
+    });
+  }
 }
 
 // A free-standing partition projected onto this wall, print twin of

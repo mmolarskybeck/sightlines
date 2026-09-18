@@ -515,6 +515,95 @@ describe("buildPlanScene floor objects", () => {
     });
   });
 
+  it("emits the support rect beneath a supported work, offset in the local frame", () => {
+    const project = createSampleProject();
+    const floorArtwork: ArtworkFloorObject = {
+      id: "fo-supported",
+      kind: "artwork",
+      artworkId: "art-1",
+      xMm: 1000,
+      yMm: 2000,
+      widthMm: 400,
+      depthMm: 300,
+      heightMm: 900,
+      rotationDeg: 90,
+      wallYMm: 1450,
+      support: {
+        kind: "pedestal",
+        widthMm: 600,
+        depthMm: 500,
+        heightMm: 1100,
+        offsetXMm: 100,
+        bonnetHeightMm: 975
+      }
+    };
+    project.floorObjects.push(floorArtwork);
+
+    const scene = buildPlanScene(project);
+
+    const entry = scene.floorObjects.find((candidate) => candidate.object.id === "fo-supported");
+    // The WORK's rect is untouched — a support never resizes what it carries.
+    expect(entry!.rect).toEqual({
+      centerXMm: 1000,
+      centerYMm: 2000,
+      widthMm: 400,
+      depthMm: 300,
+      angleDeg: 90
+    });
+    expect(entry!.support!.kind).toBe("pedestal");
+    expect(entry!.support!.hasBonnet).toBe(true);
+    expect(entry!.support!.rect.widthMm).toBe(600);
+    expect(entry!.support!.rect.depthMm).toBe(500);
+    expect(entry!.support!.rect.angleDeg).toBe(90);
+    // At 90° the support's local +x runs along floor +y.
+    expect(entry!.support!.rect.centerXMm).toBeCloseTo(1000, 6);
+    expect(entry!.support!.rect.centerYMm).toBeCloseTo(2100, 6);
+  });
+
+  it("resolves a box monitor's default pedestal, and omits support entirely otherwise", () => {
+    const project = createSampleProject();
+    const floorArtwork: ArtworkFloorObject = {
+      id: "fo-monitor",
+      kind: "artwork",
+      artworkId: "art-monitor",
+      xMm: 1000,
+      yMm: 2000,
+      widthMm: 500,
+      depthMm: 450,
+      heightMm: 375,
+      rotationDeg: 0,
+      wallYMm: 1450
+    };
+    project.floorObjects.push(floorArtwork);
+    const monitor = artworkRecord({ id: "art-monitor", displayAs: "monitor" });
+
+    const withJoin = buildPlanScene(project, {
+      artworksById: new Map([[monitor.id, monitor]])
+    });
+    const monitorEntry = withJoin.floorObjects.find(
+      (candidate) => candidate.object.id === "fo-monitor"
+    );
+    // Footprint locked to the cabinet, as it was before supports existed.
+    expect(monitorEntry!.support).toEqual({
+      rect: {
+        centerXMm: 1000,
+        centerYMm: 2000,
+        widthMm: 500,
+        depthMm: 450,
+        angleDeg: 0
+      },
+      hasBonnet: false,
+      kind: "pedestal"
+    });
+
+    // No join, no monitor: an ordinary placement's entry keeps exactly the key
+    // set it had before supports existed.
+    const withoutJoin = buildPlanScene(project);
+    expect(
+      withoutJoin.floorObjects.find((candidate) => candidate.object.id === "fo-monitor")
+    ).not.toHaveProperty("support");
+  });
+
   it("emits a freestanding floor case with its own center/footprint/rotation", () => {
     const project = createSampleProject();
     const floorCase: CaseFloorObject = {

@@ -17,11 +17,16 @@ import {
   segmentPlanRect,
   type PlanRect
 } from "../geometry/planObjects";
+import {
+  resolveFloorSupport,
+  supportPlanRect
+} from "../geometry/supportGlyphs";
 import { effectiveWallObjectPlanDepthMm } from "../placement/artworkForm";
 import type { Point } from "../geometry/polygon";
 import type {
   Artwork,
   FloorObject,
+  FloorSupportKind,
   Project,
   RoomPlacement,
   WallObject
@@ -104,7 +109,24 @@ export type PlanSceneWallObject = {
 export type PlanSceneFloorObject = {
   object: FloorObject;
   artwork?: Artwork;
+  // The WORK's own footprint — unchanged by a support, which never resizes the
+  // work it carries.
   rect: PlanRect;
+  // The block the work stands on, when it stands on one (an explicit pedestal/
+  // plinth, or a box monitor's resolved default — resolveFloorSupport settles
+  // both). Present only when there IS one, so an ordinary placement's entry
+  // keeps exactly the key set it had before supports existed.
+  //
+  // The rect is the SUPPORT's footprint in the same floor space as `rect`, with
+  // the offset already rotated into place: consumers draw it FIRST, beneath the
+  // work, and never re-derive it. `hasBonnet` rather than the bonnet's height
+  // because plan is a top-down drawing — the glass shows as a dashed outline at
+  // this same footprint and its height is invisible from above.
+  support?: {
+    rect: PlanRect;
+    hasBonnet: boolean;
+    kind: FloorSupportKind;
+  };
 };
 
 export type PlanScene = {
@@ -377,10 +399,20 @@ export function buildPlanScene(project: Project, options: PlanSceneOptions = {})
 
   const floorObjects: PlanSceneFloorObject[] = project.floorObjects.map((object) => {
     const artwork = object.kind === "artwork" ? artworksById?.get(object.artworkId) : undefined;
+    const support = resolveFloorSupport(object, artwork);
     return {
       object,
       ...(artwork ? { artwork } : {}),
-      rect: getFloorObjectPlanRect(object)
+      rect: getFloorObjectPlanRect(object),
+      ...(support
+        ? {
+            support: {
+              rect: supportPlanRect(object, support),
+              hasBonnet: support.bonnetHeightMm !== undefined,
+              kind: support.kind
+            }
+          }
+        : {})
     };
   });
 

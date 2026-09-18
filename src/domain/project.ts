@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 export const CURRENT_ARTWORK_SCHEMA_VERSION = 1;
 export const CURRENT_ASSET_SCHEMA_VERSION = 1;
 
@@ -358,6 +358,18 @@ export type ArtworkFloorMemory = FloorMemory & {
   // only one that is a stated curatorial choice rather than a measurement — a
   // "top only" floor graphic silently becoming a front+back board.
   imageFaces?: FloorObjectFace[];
+  // The floor support (pedestal/plinth/bonnet) the work was standing on at the
+  // moment of capture, and the monitor's absent-means-pedestal choice, parked
+  // with the same absent-vs-present discipline as imageFaces above: a pedestal
+  // is a real, sized, curator-authored object, and losing it on a mis-drag onto
+  // a wall and back is the same class of loss as losing the plan angle — worse,
+  // because a restored work would silently drop to the floor.
+  //
+  // Dormant here (nothing renders from it, see FloorMemory's TRAP); the restore
+  // path re-runs normalizeFloorSupport against the work's CURRENT dimensions,
+  // since the work may have been resized while it hung on the wall.
+  support?: FloorSupport;
+  monitorSupport?: MonitorSupport;
 };
 
 export type ArtworkWallObject = WallObjectBase & {
@@ -601,7 +613,56 @@ export type ArtworkFloorObject = FloorObjectBase & {
   // work is installed here (this room has plinths, that one doesn't), the same
   // split the projection board draws between imageFaces and the work itself.
   monitorSupport?: MonitorSupport;
+  // The block this work STANDS ON: a pedestal or a plinth, optionally under a
+  // plexi bonnet. Absent = the work sits on the floor (or hangs, if
+  // baseHeightMm > 0) — support and suspension are mutually exclusive states,
+  // and with a support present the work's bottom edge is the support's TOP face
+  // and baseHeightMm is ignored, exactly as cases and monitors ignore it.
+  //
+  // ATTACHED to the placement rather than modelled as its own floor object
+  // (USER DECISION 2026-09-17): the pair shares this object's xMm/yMm/
+  // rotationDeg, so a plan drag moves the assembly and nothing has to keep two
+  // objects married. See geometry/supportGlyphs.ts — resolveFloorSupport is the
+  // only correct way to read this (a box monitor with no explicit support still
+  // resolves to its 800mm pedestal), and normalizeFloorSupport owns every
+  // relational invariant between the support box and the work standing on it.
+  support?: FloorSupport;
   displayDimensionsOverride?: Dimensions;
+};
+
+// A pedestal or a plinth: physically the same attached block, distinguished by
+// proportion and by the defaults each one seeds (supportGlyphs.ts). Kept as a
+// stored kind rather than inferred from the box's dimensions because "this is a
+// plinth" is a curatorial statement that survives resizing it.
+export type FloorSupportKind = "pedestal" | "plinth";
+
+// See ArtworkFloorObject.support. Sizes here are the SUPPORT BOX's; the
+// placement's own widthMm/depthMm/heightMm still size the WORK standing on it.
+export type FloorSupport = {
+  kind: FloorSupportKind;
+  widthMm: number;
+  depthMm: number;
+  heightMm: number;
+  // The SUPPORT's center relative to the WORK's center, in the placement's
+  // rotated local frame. Absent = 0 (and a value that clamps to 0 is written
+  // absent). The inspector shows the negation, "work position on support", and
+  // negates at that one boundary — nothing else may.
+  offsetXMm?: number;
+  offsetYMm?: number;
+  // Absent/false: the work's footprint must stay inside the support's top face.
+  // True: the work may hang over an edge, subject only to the two footprints
+  // still overlapping. Absent and explicit false are both preserved verbatim —
+  // never normalised into one another.
+  overhangAllowed?: boolean;
+  // Plexi bonnet height, rising from the support's TOP face; its footprint IS
+  // the support's (USER DECISION 2026-09-17). Absent = no bonnet, which is also
+  // the only state in which bonnetHeightLocked may exist.
+  bonnetHeightMm?: number;
+  // Absent/false: the bonnet height TRACKS the work (re-derived on every
+  // normalise, so a stale imported number never survives). True: the number is
+  // the curator's and is never auto-changed — a locked bonnet shorter than the
+  // work warns rather than grows (USER DECISION 2026-09-17).
+  bonnetHeightLocked?: boolean;
 };
 
 // What a box-monitor placement stands on. See
@@ -656,6 +717,26 @@ export {
   MONITOR_BEZEL_MM,
   MONITOR_PEDESTAL_HEIGHT_MM
 } from "./geometry/monitorGlyphs";
+
+// Floor-support curatorial defaults live beside the glyph geometry that
+// consumes them too — see supportGlyphs.ts, which owns the resolver and the
+// normaliser as well. Only CONSTANTS are re-exported here: supportGlyphs.ts
+// imports types from this module, so re-exporting its functions would drag a
+// value cycle through it (project -> supportGlyphs -> monitorGlyphs ->
+// artworkForm -> project was a real cycle once).
+export {
+  PEDESTAL_MARGIN_MM,
+  PEDESTAL_MIN_FOOTPRINT_MM,
+  PEDESTAL_MIN_HEIGHT_MM,
+  PEDESTAL_MAX_HEIGHT_MM,
+  PEDESTAL_FALLBACK_HEIGHT_MM,
+  PLINTH_MARGIN_MM,
+  PLINTH_DEFAULT_HEIGHT_MM,
+  PLINTH_MIN_FOOTPRINT_MM,
+  BONNET_HEADROOM_MM,
+  BONNET_MIN_HEIGHT_MM,
+  BONNET_CLEARANCE_MM
+} from "./geometry/supportGlyphs";
 
 // Suspension-rigging constants, shared by the 3D wires (three/SuspensionWires
 // .tsx) and the elevation ghost's wires (elevation/ElevationSuspendedArtwork

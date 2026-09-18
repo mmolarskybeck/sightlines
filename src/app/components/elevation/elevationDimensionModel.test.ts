@@ -41,6 +41,7 @@ function inputFor(
     visibleFloorCaseGhosts: [],
     visibleSuspendedArtworkGhosts: [],
     visibleMonitorGhosts: [],
+    visibleSupportedArtworkGhosts: [],
     partitionNeighborShims: [],
     wallId: WALL_ID,
     wallLengthMm: WALL_LENGTH_MM,

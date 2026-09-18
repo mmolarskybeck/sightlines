@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { doorSwingPlanGlyph } from "../../../domain/geometry/doorGlyphs";
 import type { PlanRect } from "../../../domain/geometry/planObjects";
 import { PlanObject } from "./PlanObject";
@@ -295,5 +295,167 @@ describe("PlanObject — box-monitor glyph", () => {
 
     expect(container.querySelector(".plan-object-mark--monitor")).toBeNull();
     expect(container.querySelector(".plan-object-mark--artwork")).not.toBeNull();
+  });
+});
+
+// A work standing on a pedestal/plinth. The scene hands the component the
+// support's footprint already positioned in floor space (supportPlanRect); the
+// component's whole job is to draw it beneath the work and inside the same
+// pointer-handling group.
+describe("PlanObject — floor support", () => {
+  const workRect: PlanRect = {
+    centerXMm: 2000,
+    centerYMm: 1500,
+    widthMm: 400,
+    depthMm: 400,
+    angleDeg: 0
+  };
+  // 100mm reveal on every side (the pedestal default), centred on the work.
+  const supportRect: PlanRect = {
+    centerXMm: 2000,
+    centerYMm: 1500,
+    widthMm: 600,
+    depthMm: 600,
+    angleDeg: 0
+  };
+
+  it("draws the support rect at the scene's footprint, BENEATH the work", () => {
+    const { container } = renderPlanObject({
+      kind: "artwork",
+      isFloorPlaced: true,
+      planRect: workRect,
+      support: { rect: supportRect, hasBonnet: false }
+    });
+
+    const support = container.querySelector(".plan-object-support")!;
+    expect(support).not.toBeNull();
+    // The scene's numbers, untouched — the view never re-derives a footprint.
+    expect(support.getAttribute("width")).toBe(String(supportRect.widthMm));
+    expect(support.getAttribute("height")).toBe(String(supportRect.depthMm));
+    expect(support.getAttribute("x")).toBe(
+      String(supportRect.centerXMm - supportRect.widthMm / 2)
+    );
+    expect(support.getAttribute("y")).toBe(
+      String(supportRect.centerYMm - supportRect.depthMm / 2)
+    );
+
+    // Paint order is the whole reason the support is drawn first: the work's
+    // own outline has to overdraw the seam where the two meet.
+    const painted = Array.from(
+      container.querySelectorAll(".plan-object-support, .plan-object-outline")
+    );
+    expect(painted[0]!.classList.contains("plan-object-support")).toBe(true);
+    expect(painted[1]!.classList.contains("plan-object-outline")).toBe(true);
+  });
+
+  it("puts the support inside the same handler group as the work, so the assembly selects as one", () => {
+    const onSelect = vi.fn();
+    const { container } = renderPlanObject({
+      kind: "artwork",
+      isFloorPlaced: true,
+      planRect: workRect,
+      support: { rect: supportRect, hasBonnet: false },
+      onSelect
+    });
+
+    // Not "the rect has its own onClick": the group carries the handler and the
+    // support rect sits inside it, which is what makes one click on the reveal
+    // around a sculpture select the sculpture.
+    const group = container.querySelector(".plan-object")!;
+    expect(group.querySelector(".plan-object-support")).not.toBeNull();
+    fireEvent.click(container.querySelector(".plan-object-support")!);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("nets out to the support's own rotation, not a double one, on a turned placement", () => {
+    // The support group's two rotations exist to undo the outer group's rotate
+    // about the WORK's center and re-apply the support's own about ITS center.
+    // Getting this wrong rotates an offset support twice — it swings away from
+    // the work instead of turning with it — which is invisible at angleDeg 0.
+    const offsetSupport: PlanRect = { ...supportRect, centerXMm: 2100, angleDeg: 45 };
+    const { container } = renderPlanObject({
+      kind: "artwork",
+      isFloorPlaced: true,
+      planRect: { ...workRect, angleDeg: 45 },
+      support: { rect: offsetSupport, hasBonnet: false }
+    });
+
+    expect(container.querySelector(".plan-object")!.getAttribute("transform")).toBe(
+      `rotate(45 ${workRect.centerXMm} ${workRect.centerYMm})`
+    );
+    expect(
+      container.querySelector(".plan-object-support-group")!.getAttribute("transform")
+    ).toBe(
+      `rotate(-45 ${workRect.centerXMm} ${workRect.centerYMm})` +
+        ` rotate(45 ${offsetSupport.centerXMm} ${offsetSupport.centerYMm})`
+    );
+  });
+
+  it("adds a dashed bonnet rect at the SUPPORT's footprint only when there is a bonnet", () => {
+    const { container: without } = renderPlanObject({
+      kind: "artwork",
+      isFloorPlaced: true,
+      planRect: workRect,
+      support: { rect: supportRect, hasBonnet: false }
+    });
+    expect(without.querySelector(".plan-object-support-bonnet")).toBeNull();
+
+    const { container: with_ } = renderPlanObject({
+      kind: "artwork",
+      isFloorPlaced: true,
+      planRect: workRect,
+      support: { rect: supportRect, hasBonnet: true }
+    });
+    const bonnet = with_.querySelector(".plan-object-support-bonnet")!;
+    expect(bonnet).not.toBeNull();
+    // Bonnet footprint = support footprint (USER DECISION 2026-09-17) — not the
+    // work's, and not an inset of either.
+    expect(bonnet.getAttribute("width")).toBe(String(supportRect.widthMm));
+    expect(bonnet.getAttribute("height")).toBe(String(supportRect.depthMm));
+  });
+
+  it("draws nothing extra for a work standing on the bare floor", () => {
+    const { container } = renderPlanObject({
+      kind: "artwork",
+      isFloorPlaced: true,
+      planRect: workRect
+    });
+    expect(container.querySelector(".plan-object-support")).toBeNull();
+    expect(container.querySelector(".plan-object-support-group")).toBeNull();
+  });
+
+  it("takes a legacy monitor's pedestal from the scene entry, not from the cabinet's own size", () => {
+    // Before supports existed, plan drew ONE rect and called it both cabinet
+    // and pedestal on the grounds that the two footprints were equal by
+    // construction. They are equal for the monitor default and diverge the
+    // moment the cabinet goes on a named plinth, so the pedestal now comes off
+    // the scene like any other support.
+    const plinth: PlanRect = { ...supportRect, widthMm: 900, depthMm: 800 };
+    const { container } = renderPlanObject({
+      kind: "artwork",
+      isFloorPlaced: true,
+      isMonitor: true,
+      planRect: workRect,
+      support: { rect: plinth, hasBonnet: false }
+    });
+
+    const support = container.querySelector(".plan-object-support")!;
+    expect(support.getAttribute("width")).toBe("900");
+    expect(support.getAttribute("height")).toBe("800");
+    // The cabinet's own rect is untouched by what it stands on.
+    const outline = container.querySelector(".plan-object-outline")!;
+    expect(outline.getAttribute("width")).toBe(String(workRect.widthMm));
+    // And the screen line is still drawn: the support did not replace the glyph.
+    expect(container.querySelector(".plan-object-mark--monitor line")).not.toBeNull();
+  });
+
+  it("gives a ghost no support rect at all, so a click-to-place click still commits", () => {
+    const { container } = renderPlanObject({
+      kind: "artwork",
+      isGhost: true,
+      planRect: workRect,
+      support: { rect: supportRect, hasBonnet: true }
+    });
+    expect(container.querySelector(".plan-object-support")).toBeNull();
   });
 });

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { CURRENT_SCHEMA_VERSION, type Project } from "../project";
 import { parseFaceWallId } from "../geometry/freestandingWalls";
 import { normalizeOpeningPairs } from "../placement/openingPairs";
+import { normalizeFloorSupport } from "../geometry/supportGlyphs";
 
 const displayUnitSchema = z.enum(["in", "ft", "cm", "m"]);
 
@@ -69,8 +70,40 @@ const floorMemorySchema = z.object({
 // malformed claim about physical construction worth rejecting loudly, whereas
 // stripping imageFaces from a blocked zone's dormant memory is the correct
 // outcome anyway — there is no image, no reader, and nothing drawn changes.
+// The attached pedestal/plinth block (ArtworkFloorObject.support). Purely
+// STRUCTURAL, like every other schema here: whether this support actually holds
+// the work standing on it — footprint containment, offset clamps, bonnet
+// clearance and the derived bonnet height — is a RELATIONAL invariant between
+// the support and the placement's own dimensions, and lives in exactly one
+// place, normalizeFloorSupport (geometry/supportGlyphs.ts), which the load
+// boundary below runs over every parsed document. Encoding those rules here as
+// refinements would make a repairable document unopenable.
+//
+// Every member beyond kind/size is optional and absence is meaningful, so this
+// is additive in SHAPE — but it still rides the v5 -> v6 bump, for the DOWNGRADE
+// direction only: see MIGRATIONS.
+const floorSupportSchema = z.object({
+  kind: z.enum(["pedestal", "plinth"]),
+  widthMm: z.number().positive(),
+  depthMm: z.number().positive(),
+  heightMm: z.number().positive(),
+  // Signed: the work may be displaced either way along either local axis.
+  offsetXMm: z.number().finite().optional(),
+  offsetYMm: z.number().finite().optional(),
+  overhangAllowed: z.boolean().optional(),
+  // Positive, not non-negative: a zero-height bonnet is the absence of a
+  // bonnet, and absence is already how that is written.
+  bonnetHeightMm: z.number().positive().optional(),
+  bonnetHeightLocked: z.boolean().optional()
+});
+
 const artworkFloorMemorySchema = floorMemorySchema.extend({
-  imageFaces: z.array(floorObjectFaceSchema).optional()
+  imageFaces: z.array(floorObjectFaceSchema).optional(),
+  // Parked floor support + monitor choice, mirroring the live fields they
+  // shadow so the memory cannot hold a value that would fail validation the
+  // moment it is restored onto a floor object.
+  support: floorSupportSchema.optional(),
+  monitorSupport: z.enum(["pedestal", "floor"]).optional()
 });
 
 const artworkWallObjectSchema = wallObjectBaseSchema.extend({
@@ -182,6 +215,9 @@ const artworkFloorObjectSchema = floorObjectBaseSchema.extend({
   // displayAs is "monitor"; a stray value on any other work is inert rather
   // than invalid, since the join isn't available at parse time.
   monitorSupport: z.enum(["pedestal", "floor"]).optional(),
+  // The attached pedestal/plinth this work stands on. Structurally optional,
+  // but it rides the v5 -> v6 bump — see MIGRATIONS.
+  support: floorSupportSchema.optional(),
   displayDimensionsOverride: dimensionsSchema.optional()
 });
 
@@ -534,6 +570,7 @@ export function migrateProjectJson(text: string): Project {
 export function migrateProjectJsonWithReport(text: string): {
   project: Project;
   repairedCount: number;
+  supportRepairCount: number;
 } {
   if (typeof text !== "string") {
     throw new Error("no file content was provided.");
@@ -574,7 +611,15 @@ const MIGRATIONS: Record<number, (doc: Doc) => Doc> = {
   // direction: it makes an older build refuse the document (see the
   // schemaVersion > CURRENT check below) instead of silently stripping the flag
   // and re-saving every open wall as solid.
-  4: (doc) => ({ ...doc, schemaVersion: 5 })
+  4: (doc) => ({ ...doc, schemaVersion: 5 }),
+  // v6 adds attached floor supports (ArtworkFloorObject.support — pedestal,
+  // plinth, plexi bonnet). A v5 project has none, so this is a pure version
+  // stamp like v1->v2, v3->v4 and v4->v5. The bump exists for the DOWNGRADE
+  // direction, exactly the isOpenSide rationale above: a v5 build would accept
+  // the file, STRIP `support`, draw the sculpture flat on the floor and re-save
+  // that loss — a silently wrong picture of the document, not merely a missing
+  // convenience.
+  5: (doc) => ({ ...doc, schemaVersion: 6 })
 };
 
 function migrateV2ToV3(doc: Doc): Doc {
@@ -617,6 +662,17 @@ export function migrateProject(input: unknown): Project {
 export function migrateProjectWithReport(input: unknown): {
   project: Project;
   repairedCount: number;
+  // Floor placements whose attached support had to be normalised on the way in
+  // (a detached pedestal, an undersized overhang-off box, a stale bonnet
+  // height). DELIBERATELY NOT folded into repairedCount, whose user-facing copy
+  // means "invalid shared-opening pairs disconnected" and would become a lie.
+  supportRepairCount: number;
+  // The parsed, migrated document BEFORE the support repair — what storage
+  // actually holds. The SAME reference as `project` when supportRepairCount is
+  // 0. An open path snapshots this and, when it differs from `project`, writes
+  // the repaired copy back; without it the repair would live only in memory and
+  // the stored record would trigger the same repair (and warning) on every open.
+  stored: Project;
 } {
   const versioned = versionedDocumentSchema.safeParse(input);
 
@@ -659,7 +715,13 @@ export function migrateProjectWithReport(input: unknown): {
   const { project: repaired, repairedCount } = normalizeOpeningPairs(migrated as unknown as Project);
 
   try {
-    return { project: parseProject(repaired), repairedCount };
+    // Structural validation first, then the RELATIONAL support invariants: the
+    // normaliser reads the placement's own dimensions, so it can only run on a
+    // document already known to have them. See floorSupportSchema for why the
+    // rules are not zod refinements.
+    const stored = parseProject(repaired);
+    const { project, supportRepairCount } = normalizeProjectFloorSupports(stored);
+    return { project, repairedCount, supportRepairCount, stored };
   } catch (error) {
     if (error instanceof z.ZodError) {
       const [issue] = error.issues;
@@ -670,4 +732,33 @@ export function migrateProjectWithReport(input: unknown): {
     }
     throw error;
   }
+}
+
+// Runs the ONE support normaliser (geometry/supportGlyphs.ts) over every floor
+// placement carrying a support, at the load boundary, and reports how many had
+// to change. Hand-edited files, a package written by a build with a different
+// default, and an undo history replayed out of a stale document all arrive
+// here; the alternative is a pedestal that renders detached from its sculpture
+// in plan and only snaps back the next time someone happens to edit it.
+//
+// Returns the SAME project object when nothing changed, so a clean document's
+// identity (and its cloud-backup fingerprint) is untouched.
+//
+// Exported for the in-memory project repository (src/test/inMemoryRepositories),
+// whose loadWithReport has to produce the same report as the real read without
+// re-parsing a document the tests hand back by reference.
+export function normalizeProjectFloorSupports(project: Project): {
+  project: Project;
+  supportRepairCount: number;
+} {
+  let supportRepairCount = 0;
+  const floorObjects = project.floorObjects.map((object) => {
+    if (object.kind !== "artwork" || !object.support) return object;
+    const { support, changed } = normalizeFloorSupport(object, object.support);
+    if (!changed) return object;
+    supportRepairCount += 1;
+    return { ...object, support };
+  });
+  if (supportRepairCount === 0) return { project, supportRepairCount: 0 };
+  return { project: { ...project, floorObjects }, supportRepairCount };
 }

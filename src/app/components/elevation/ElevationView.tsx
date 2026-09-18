@@ -64,6 +64,7 @@ import { ElevationOpening } from "./ElevationOpening";
 import { ElevationCase, ElevationFloorCaseGhost } from "./ElevationCase";
 import { ElevationPartitionProfile } from "./ElevationPartitionProfile";
 import { ElevationSuspendedArtworkGhost } from "./ElevationSuspendedArtworkGhost";
+import { ElevationSupportedArtworkGhost } from "./ElevationSupportedArtworkGhost";
 import { ElevationMonitorGhost } from "./ElevationMonitorGhost";
 import { ElevationWallText } from "./ElevationWallText";
 import {
@@ -470,7 +471,11 @@ export function ElevationView({
   const visibleSuspendedArtworkGhosts = ghostsVisible
     ? elevationScene.suspendedArtworkGhosts
     : [];
-  // Box monitors ride the same one gate as the other two ghost families.
+  // Works standing on a pedestal/plinth ride the same one gate.
+  const visibleSupportedArtworkGhosts = ghostsVisible
+    ? elevationScene.supportedArtworkGhosts
+    : [];
+  // Box monitors ride the same one gate as the other ghost families.
   const visibleMonitorGhosts = ghostsVisible ? elevationScene.monitorGhosts : [];
   // Abutting slabs are architecture, not projection: they stay in every state.
   const visiblePartitionProfiles = selectVisiblePartitionProfiles(
@@ -779,6 +784,7 @@ export function ElevationView({
     visibleFloorCaseGhosts,
     visibleSuspendedArtworkGhosts,
     visibleMonitorGhosts,
+    visibleSupportedArtworkGhosts,
     partitionNeighborShims,
     wallId,
     wallLengthMm,
@@ -927,14 +933,36 @@ export function ElevationView({
             xMinMm={ghost.xMinMm}
           />
         ))}
+        {/* Works standing on a pedestal or plinth: same slot, inert and dashed,
+            standing on the floor line. Two spans — the support's own for the
+            support block and the bonnet, the work's own for the work outline
+            above it (see the component). */}
+        {visibleSupportedArtworkGhosts.map((ghost) => (
+          <ElevationSupportedArtworkGhost
+            key={ghost.objectId}
+            bonnetHeightMm={ghost.bonnetHeightMm}
+            supportHeightMm={ghost.supportHeightMm}
+            supportXMaxMm={ghost.supportXMaxMm}
+            supportXMinMm={ghost.supportXMinMm}
+            wallHeightMm={wallHeightMm}
+            workHeightMm={ghost.workHeightMm}
+            workXMaxMm={ghost.workXMaxMm}
+            workXMinMm={ghost.workXMinMm}
+            xMaxMm={ghost.xMaxMm}
+            xMinMm={ghost.xMinMm}
+          />
+        ))}
         {/* Box monitors standing in front of this wall: the same behind-the-
             wall-objects paint slot, inert and dashed, but standing on the floor
             line (pedestal + cabinet) rather than floating. */}
         {visibleMonitorGhosts.map((ghost) => (
           <ElevationMonitorGhost
             key={ghost.object.id}
+            bonnetHeightMm={ghost.bonnetHeightMm}
             monitorHeightMm={ghost.monitorHeightMm}
             pedestalHeightMm={ghost.pedestalHeightMm}
+            supportXMaxMm={ghost.supportXMaxMm}
+            supportXMinMm={ghost.supportXMinMm}
             wallHeightMm={wallHeightMm}
             xMaxMm={ghost.xMaxMm}
             xMinMm={ghost.xMinMm}

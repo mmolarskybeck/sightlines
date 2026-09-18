@@ -2430,6 +2430,132 @@ describe("app store", () => {
     expect(store.getState().project?.checklistArtworkIds).toEqual([sharedId]);
   });
 
+  // The everyday open path used to drop the load report: migrateProject
+  // normalised a support silently, so a pedestal that had detached from its
+  // sculpture (or was narrower than it) was quietly redrawn and never
+  // mentioned. Both ordinary opens now ask for the report and say so, in the
+  // same words the snapshot-restore and JSON-import paths use.
+  describe("floor-support load repair", () => {
+    // A 600×400 work on a 300×300 pedestal with overhang off: the normaliser
+    // has to grow the pedestal to contain the work.
+    function undersizedPedestalDocument(id: string): Project {
+      const base = store.getState().project!;
+      return {
+        ...base,
+        id,
+        title: id,
+        floorObjects: [
+          {
+            id: "fo-1",
+            kind: "artwork",
+            artworkId: "art-1",
+            xMm: 1000,
+            yMm: 1000,
+            widthMm: 600,
+            depthMm: 400,
+            heightMm: 900,
+            rotationDeg: 0,
+            wallYMm: 1450,
+            support: { kind: "pedestal", widthMm: 300, depthMm: 300, heightMm: 1100 }
+          }
+        ]
+      };
+    }
+
+    function pedestalOf(project: Project | null) {
+      const object = project?.floorObjects.find((candidate) => candidate.id === "fo-1");
+      return object?.kind === "artwork" ? object.support : undefined;
+    }
+
+    it("re-fits the pedestal on boot and announces it", async () => {
+      const warning = vi.spyOn(toast, "warning");
+      const repo = new InMemoryProjectRepository();
+      await repo.save(undersizedPedestalDocument("boot-support-000001"));
+
+      const s = createAppStore(makeDeps({ projectRepository: repo }));
+      await s.getState().boot();
+
+      const state = s.getState();
+      expect(pedestalOf(state.project)).toMatchObject({ widthMm: 600, depthMm: 400 });
+      // The repair rides the document swap; it is not an edit the user can undo.
+      expect(state.undoStack).toHaveLength(0);
+      expect(warning).toHaveBeenCalledWith(
+        "One pedestal was re-fitted to the work standing on it while opening this project."
+      );
+      warning.mockRestore();
+    });
+
+    it("re-fits the pedestal on openProject and announces it", async () => {
+      const warning = vi.spyOn(toast, "warning");
+      const document = undersizedPedestalDocument("open-support-000001");
+      await repository.save(document);
+
+      await store.getState().openProject(document.id);
+
+      expect(pedestalOf(store.getState().project)).toMatchObject({
+        widthMm: 600,
+        depthMm: 400
+      });
+      expect(warning).toHaveBeenCalledWith(
+        "One pedestal was re-fitted to the work standing on it while opening this project."
+      );
+      warning.mockRestore();
+    });
+
+    it("writes the re-fitted pedestal back so the repair is not redone on every open", async () => {
+      const warning = vi.spyOn(toast, "warning");
+      const document = undersizedPedestalDocument("open-support-000003");
+      await repository.save(document);
+
+      await store.getState().openProject(document.id);
+      // The stored record now holds the repaired support, not the original:
+      // the repository applied the repair on the way in, so setDocument had
+      // nothing to change, and only `stored` differing from `project` says a
+      // write-back is due.
+      expect(pedestalOf(await repository.load(document.id))).toMatchObject({
+        widthMm: 600,
+        depthMm: 400
+      });
+      expect(store.getState().saveState).toBe("saved");
+
+      // A second open finds a clean document: no repair, no warning.
+      warning.mockClear();
+      const reopened = await repository.loadWithReport(document.id);
+      expect(reopened.supportRepairCount).toBe(0);
+      expect(reopened.stored).toBe(reopened.project);
+      const second = createAppStore(makeDeps({ projectRepository: repository }));
+      await second.getState().openProject(document.id);
+      expect(warning).not.toHaveBeenCalled();
+      warning.mockRestore();
+    });
+
+    it("says nothing when every support is already fitted", async () => {
+      const warning = vi.spyOn(toast, "warning");
+      const clean = undersizedPedestalDocument("open-support-000002");
+      const fitted: Project = {
+        ...clean,
+        floorObjects: clean.floorObjects.map((object) =>
+          object.kind === "artwork"
+            ? {
+                ...object,
+                support: { kind: "pedestal" as const, widthMm: 800, depthMm: 600, heightMm: 1100 }
+              }
+            : object
+        )
+      };
+      await repository.save(fitted);
+
+      await store.getState().openProject(fitted.id);
+
+      expect(pedestalOf(store.getState().project)).toMatchObject({
+        widthMm: 800,
+        depthMm: 600
+      });
+      expect(warning).not.toHaveBeenCalled();
+      warning.mockRestore();
+    });
+  });
+
   describe("deleteLibraryArtworks", () => {
     it("cascades across projects, cleans the open one, and erases records + assets", async () => {
       await store.getState().addArtworksFromFiles(

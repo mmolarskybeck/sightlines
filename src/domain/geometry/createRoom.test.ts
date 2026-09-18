@@ -3,11 +3,16 @@ import { parseProject } from "../schema/projectSchema";
 import { createSampleProject } from "../sample/sampleProject";
 import { feetToMm } from "../units/length";
 import {
+  COMPASS_WALL_NAMES,
   createNextDrawnRectangleRoom,
   createNextPolygonRoom,
   createNextRectangleRoom,
   createPolygonRoomPlacement,
-  createRectangularRoomPlacement
+  createRectangularRoomPlacement,
+  hasDefaultWallNames,
+  isDefaultWallName,
+  relabelWallsFromNorth,
+  wallNamesReplacedByNorth
 } from "./createRoom";
 import { getFloorBounds, getWallsWithGeometry } from "./walls";
 import { signedAreaMm2 } from "./polygon";
@@ -340,5 +345,200 @@ describe("createNextDrawnRectangleRoom", () => {
         depthMm: 2500
       })
     ).toThrow(/greater than zero/);
+  });
+});
+
+describe("relabelWallsFromNorth", () => {
+  const rectangle = () =>
+    createRectangularRoomPlacement({
+      roomId: "room-2",
+      name: "Gallery 2",
+      widthMm: 6000,
+      depthMm: 4000,
+      heightMm: 3000,
+      offsetXMm: 0,
+      offsetYMm: 0
+    }).room;
+
+  // A quadrilateral drawn clockwise, so the constructor normalises the winding
+  // — the case that would break if the loop were walked backwards.
+  const quadrilateral = () =>
+    createPolygonRoomPlacement({
+      roomId: "room-3",
+      name: "Gallery 3",
+      heightMm: 3000,
+      pointsFloorMm: [
+        { xMm: 0, yMm: 0 },
+        { xMm: 0, yMm: 4000 },
+        { xMm: 6000, yMm: 4000 },
+        { xMm: 6000, yMm: 0 }
+      ]
+    }).room;
+
+  it("reproduces the rectangle's own convention when its north wall is chosen", () => {
+    const room = rectangle();
+    const walls = relabelWallsFromNorth(room, "room-2-wall-north");
+
+    expect(walls?.map((wall) => wall.name)).toEqual([
+      "North wall",
+      "East wall",
+      "South wall",
+      "West wall"
+    ]);
+    // Idempotent: nothing moved, so the ids still line up with their names.
+    expect(walls?.map((wall) => wall.id)).toEqual(room.walls.map((wall) => wall.id));
+  });
+
+  it("rotates the compass from each starting wall, keeping stored loop order", () => {
+    const room = rectangle();
+    const expected = [
+      ["North wall", "East wall", "South wall", "West wall"],
+      ["West wall", "North wall", "East wall", "South wall"],
+      ["South wall", "West wall", "North wall", "East wall"],
+      ["East wall", "South wall", "West wall", "North wall"]
+    ];
+
+    room.walls.forEach((wall, index) => {
+      const walls = relabelWallsFromNorth(room, wall.id);
+      expect(walls?.map((candidate) => candidate.name)).toEqual(expected[index]);
+      expect(walls?.map((candidate) => candidate.id)).toEqual(
+        room.walls.map((candidate) => candidate.id)
+      );
+      // The chosen wall is the one that reads North, whichever index it sits at.
+      expect(walls?.[index]?.name).toBe("North wall");
+    });
+  });
+
+  it("works the same on a normalised 4-vertex polygon room", () => {
+    const room = quadrilateral();
+    expect(room.walls.map((wall) => wall.name)).toEqual([
+      "Wall 1",
+      "Wall 2",
+      "Wall 3",
+      "Wall 4"
+    ]);
+
+    const walls = relabelWallsFromNorth(room, room.walls[1]!.id);
+    expect(walls?.map((wall) => wall.name)).toEqual([
+      "West wall",
+      "North wall",
+      "East wall",
+      "South wall"
+    ]);
+  });
+
+  it("returns null for rooms that are not quadrilaterals", () => {
+    const triangle = createPolygonRoomPlacement({
+      roomId: "room-4",
+      name: "Gallery 4",
+      heightMm: 3000,
+      pointsFloorMm: [
+        { xMm: 0, yMm: 0 },
+        { xMm: 4000, yMm: 0 },
+        { xMm: 0, yMm: 4000 }
+      ]
+    }).room;
+    expect(relabelWallsFromNorth(triangle, triangle.walls[0]!.id)).toBeNull();
+
+    const lShape = createPolygonRoomPlacement({
+      roomId: "room-5",
+      name: "Gallery 5",
+      heightMm: 3000,
+      pointsFloorMm: L_SHAPE
+    }).room;
+    expect(lShape.walls).toHaveLength(6);
+    expect(relabelWallsFromNorth(lShape, lShape.walls[0]!.id)).toBeNull();
+  });
+
+  it("returns null for a wall that is not this room's", () => {
+    expect(relabelWallsFromNorth(rectangle(), "room-9-wall-north")).toBeNull();
+  });
+});
+
+describe("hasDefaultWallNames", () => {
+  const named = (...names: string[]) => names.map((name) => ({ name }));
+
+  it("accepts birth names: compass in loop order from any start, or Wall 1..n", () => {
+    expect(hasDefaultWallNames(named("North wall", "East wall", "South wall", "West wall"))).toBe(true);
+    expect(hasDefaultWallNames(named("West wall", "North wall", "East wall", "South wall"))).toBe(true);
+    expect(hasDefaultWallNames(named("Wall 1", "Wall 2", "Wall 3", "Wall 4"))).toBe(true);
+    expect(hasDefaultWallNames(named("Wall 1", "Wall 2", "Wall 3", "Wall 4", "Wall 5"))).toBe(true);
+  });
+
+  it("treats names that pass isDefaultWallName one by one as custom when the pattern is off", () => {
+    // A typed "Wall 12" in a four-wall room.
+    expect(hasDefaultWallNames(named("Wall 12", "Wall 2", "Wall 3", "Wall 4"))).toBe(false);
+    // A duplicated compass name.
+    expect(hasDefaultWallNames(named("North wall", "East wall", "East wall", "West wall"))).toBe(false);
+    // Compass names out of loop order.
+    expect(hasDefaultWallNames(named("North wall", "South wall", "East wall", "West wall"))).toBe(false);
+    // Numbered out of order.
+    expect(hasDefaultWallNames(named("Wall 2", "Wall 1", "Wall 3", "Wall 4"))).toBe(false);
+    expect(hasDefaultWallNames(named("Gallery entrance", "East wall", "South wall", "West wall"))).toBe(false);
+  });
+});
+
+describe("wallNamesReplacedByNorth", () => {
+  const rectangle = () =>
+    createRectangularRoomPlacement({
+      roomId: "room-3",
+      name: "Gallery 3",
+      widthMm: 6000,
+      depthMm: 4000,
+      heightMm: 3000,
+      offsetXMm: 0,
+      offsetYMm: 0
+    }).room;
+
+  it("lists only the names the relabel would change", () => {
+    const room = { ...rectangle() };
+    room.walls = room.walls.map((wall, index) =>
+      index === 1 ? { ...wall, name: "Long wall" } : wall
+    );
+    // Choosing the current North wall keeps three names and replaces one.
+    expect(wallNamesReplacedByNorth(room, room.walls[0]!.id)).toEqual(["Long wall"]);
+    // Choosing the East wall rotates every name, but only the typed one is
+    // worth naming — the dialog already says all four are renamed.
+    expect(wallNamesReplacedByNorth(room, room.walls[1]!.id)).toEqual(["Long wall"]);
+  });
+
+  it("falls back to every changed name when the pattern is custom without a typed name", () => {
+    const room = { ...rectangle() };
+    room.walls = room.walls.map((wall, index) =>
+      index === 2 ? { ...wall, name: "East wall" } : wall
+    );
+    // Position 2 already reads "East wall", which is what it becomes under
+    // this rotation, so it is the one name NOT at stake.
+    expect(wallNamesReplacedByNorth(room, room.walls[1]!.id)).toEqual([
+      "North wall",
+      "East wall",
+      "West wall"
+    ]);
+    // Birth names: nothing at stake, nothing listed.
+    expect(wallNamesReplacedByNorth(rectangle(), rectangle().walls[1]!.id)).toEqual([]);
+  });
+
+  it("is empty for an ineligible room", () => {
+    const room = rectangle();
+    expect(wallNamesReplacedByNorth(room, "nope")).toEqual([]);
+  });
+});
+
+describe("isDefaultWallName", () => {
+  it.each(COMPASS_WALL_NAMES)("treats %s as a default", (name) => {
+    expect(isDefaultWallName(name)).toBe(true);
+  });
+
+  it("treats a numbered polygon wall name as a default", () => {
+    expect(isDefaultWallName("Wall 1")).toBe(true);
+    expect(isDefaultWallName("Wall 12")).toBe(true);
+  });
+
+  it("treats anything the user could have typed as custom", () => {
+    expect(isDefaultWallName("Wall")).toBe(false);
+    expect(isDefaultWallName("Wall 1a")).toBe(false);
+    expect(isDefaultWallName("Gallery entrance")).toBe(false);
+    expect(isDefaultWallName("north wall")).toBe(false);
+    expect(isDefaultWallName("")).toBe(false);
   });
 });

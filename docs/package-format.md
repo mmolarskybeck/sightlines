@@ -204,7 +204,7 @@ documents. Import therefore parses in stages:
    artworks: unknown[], assets }` validates the wrapper only.
 3. **Migrate embedded documents** — the embedded project and artworks run the
    SAME migration chains the app uses when loading from IndexedDB
-   (`migrateProject` v1→v5, `migrateArtwork`), so a v1-era package opens exactly
+   (`migrateProject` v1→v6, `migrateArtwork`), so a v1-era package opens exactly
    like a v1-era local file.
 4. **Strict validation** — the assembled, fully-migrated manifest must pass the
    same contract export writes.

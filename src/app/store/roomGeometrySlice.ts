@@ -1,7 +1,8 @@
 import {
   createNextDrawnRectangleRoom,
   createNextPolygonRoom,
-  createNextRectangleRoom
+  createNextRectangleRoom,
+  relabelWallsFromNorth
 } from "../../domain/geometry/createRoom";
 import type { Point } from "../../domain/geometry/polygon";
 import {
@@ -16,6 +17,7 @@ import {
   duplicateFreestandingWallEdit,
   faceWallIdsOf,
   moveFreestandingEndpoint as moveFreestandingEndpointEdit,
+  parseFaceWallId,
   moveFreestandingWall as moveFreestandingWallEdit,
   roomIdContainingPoint,
   rotateFreestandingWall as rotateFreestandingWallEdit,
@@ -49,6 +51,11 @@ import { NO_SELECTION, selectionWrite, type Selection } from "./selectionSlice";
 
 export type RoomGeometrySliceActions = {
   renameRoom: (roomId: string, name: string) => Promise<void>;
+  renameWall: (wallId: string, name: string) => Promise<void>;
+  // Relabels ALL FOUR walls of a quadrilateral room so the given wall reads
+  // "North wall" — deliberately destructive of custom names, which is why the
+  // UI confirms before calling it.
+  setRoomNorthWall: (roomId: string, wallId: string) => Promise<void>;
   deleteRoom: (roomId: string) => Promise<void>;
   addRectangleRoom: () => Promise<void>;
   addPolygonRoom: (pointsFloorMm: Point[]) => Promise<void>;
@@ -162,6 +169,60 @@ export function createRoomGeometrySlice(
               ? { ...placement, room: { ...placement.room, name: trimmed } }
               : placement
           )
+        }
+      }));
+    },
+
+    async renameWall(wallId, name) {
+      const project = get().project;
+      const trimmed = name.trim();
+      if (!project || trimmed.length === 0) return;
+      // Partition faces are derived — their names come from the freestanding
+      // wall, so there is no stored string here to rename.
+      if (parseFaceWallId(wallId) !== null) return;
+
+      const wall = project.floor.rooms
+        .flatMap((placement) => placement.room.walls)
+        .find((candidate) => candidate.id === wallId);
+      if (!wall || wall.name === trimmed) return;
+
+      await applyEdit("Rename wall", (current) => ({
+        ...current,
+        floor: {
+          rooms: current.floor.rooms.map((placement) => ({
+            ...placement,
+            room: {
+              ...placement.room,
+              walls: placement.room.walls.map((candidate) =>
+                candidate.id === wallId ? { ...candidate, name: trimmed } : candidate
+              )
+            }
+          }))
+        }
+      }));
+    },
+
+    async setRoomNorthWall(roomId, wallId) {
+      const project = get().project;
+      if (!project || parseFaceWallId(wallId) !== null) return;
+
+      const roomPlacement = project.floor.rooms.find(
+        (placement) => placement.roomId === roomId
+      );
+      if (!roomPlacement) return;
+      // Null covers both "not a quadrilateral" and "not this room's wall" —
+      // either way there is no compass to assign.
+      const relabelled = relabelWallsFromNorth(roomPlacement.room, wallId);
+      if (!relabelled) return;
+
+      await applyEdit("Relabel walls", (current) => ({
+        ...current,
+        floor: {
+          rooms: current.floor.rooms.map((placement) => {
+            if (placement.roomId !== roomId) return placement;
+            const walls = relabelWallsFromNorth(placement.room, wallId);
+            return walls ? { ...placement, room: { ...placement.room, walls } } : placement;
+          })
         }
       }));
     },

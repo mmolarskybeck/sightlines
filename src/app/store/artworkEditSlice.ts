@@ -10,6 +10,7 @@ import { parseArtwork } from "../../domain/schema/artworkSchema";
 import type { Artwork, Project } from "../../domain/project";
 import type { PixelAspect } from "../../domain/units/aspectFill";
 import type { AppState, EditEntry, EditExtras } from "../store";
+import { withNormalizedSupport } from "./floorObjectSlice";
 
 export type UpdateArtworkChanges = Partial<
   Pick<
@@ -249,7 +250,11 @@ export function createArtworkEditSlice(
             return object;
           }
           floorChanged = true;
-          return next;
+          // The support's invariants are all stated against the work, so a
+          // rebake that grows the work re-fits its pedestal IN THIS SAME
+          // entry (and re-derives an unlocked bonnet). Splitting it out would
+          // leave one undo restoring a work its own box no longer contains.
+          return withNormalizedSupport(next);
         });
 
         if (affectedIds.size > 0 || floorChanged) {
@@ -291,12 +296,14 @@ export function createArtworkEditSlice(
             return object;
           }
           floorChanged = true;
-          return {
+          // Re-seeding the cabinet resizes the work, so its support is
+          // re-fitted in the same entry — see the dimension rebake above.
+          return withNormalizedSupport({
             ...object,
             widthMm: size.widthMm,
             heightMm: size.heightMm,
             depthMm: size.depthMm
-          };
+          });
         });
         if (floorChanged) {
           // Floor objects carry no wall bounds to validate (see

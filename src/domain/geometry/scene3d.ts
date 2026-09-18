@@ -4,7 +4,6 @@ import type {
   Dimensions,
   FloorObject,
   FloorObjectFace,
-  MonitorSupport,
   Project,
   RoomPlacement,
   WallObject
@@ -13,6 +12,10 @@ import { effectiveDisplayAs, effectiveWallArtworkDepthMm } from "../placement/ar
 import { getFreestandingFaces } from "./freestandingWalls";
 import { buildFloorWallsById, evaluateOpeningPairWith } from "./openingConnections";
 import { isPointInPolygon, signedAreaMm2 } from "./polygon";
+import {
+  resolveFloorSupport,
+  type ResolvedFloorSupport
+} from "./supportGlyphs";
 import { unitLeftNormalOrZero } from "./vector";
 import { getWallsWithGeometry } from "./walls";
 
@@ -129,12 +132,18 @@ export type FloorObject3d = {
   // layer's dispatch (SceneRooms) stays a single equality test. "monitor"
   // makes the render layer draw a CRT cabinet instead of the neutral image box.
   displayAs?: ArtworkDisplayAs;
-  // What a monitor placement stands on (ArtworkFloorObject.monitorSupport).
-  // Passed through VERBATIM, absent included: absent means "never chosen" and
-  // resolves to a pedestal (resolveMonitorSupport). Resolving it here would
-  // hard-code today's default into every derived scene — the same rule
-  // imageFaces above follows.
-  monitorSupport?: MonitorSupport;
+  // The RESOLVED block this work stands on — an explicit pedestal/plinth, or a
+  // box monitor's default pedestal — already normalised into a box with a size,
+  // an offset and an optional bonnet (resolveFloorSupport). Unlike imageFaces
+  // and displayAs this IS resolved here rather than passed through raw, because
+  // the alternative is every mesh re-deriving the monitor default and the 3D
+  // model disagreeing with the plan about whether there is a plinth at all.
+  //
+  // Emitted ONLY when there is a support, so a floor-resting object's entry
+  // keeps exactly the key set it had before supports existed. When present, the
+  // work's bottom edge sits at support.heightMm and baseHeightMm is ignored —
+  // the two never appear together (see ArtworkFloorObject.support).
+  support?: ResolvedFloorSupport;
   // The WORK's own recorded dimensions (artwork only) — deliberately NOT the
   // same numbers as widthMm/heightMm below, which size the OBJECT STANDING ON
   // THE FLOOR (a projection board, a plinth, a sculpture's bounding box). The
@@ -332,6 +341,7 @@ export function deriveScene3d(
       // separate treatment for it — only a resolved type that actually
       // changes SceneRooms's dispatch (monitor today) is worth stating.
       const resolvedDisplayAs = artwork ? effectiveDisplayAs(artwork) : undefined;
+      const resolvedSupport = resolveFloorSupport(object, artwork);
       return {
         objectId: object.id,
         kind: object.kind,
@@ -350,9 +360,7 @@ export function deriveScene3d(
               ...(resolvedDisplayAs && resolvedDisplayAs !== "framed"
                 ? { displayAs: resolvedDisplayAs }
                 : {}),
-              ...(object.monitorSupport
-                ? { monitorSupport: object.monitorSupport }
-                : {}),
+              ...(resolvedSupport ? { support: resolvedSupport } : {}),
               // Per axis, and only when recorded — see artworkWidthMm's note.
               ...(artwork?.dimensions.widthMm !== undefined
                 ? { artworkWidthMm: artwork.dimensions.widthMm }

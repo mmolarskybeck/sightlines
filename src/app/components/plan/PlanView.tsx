@@ -13,12 +13,14 @@ import { getFloorBounds } from "../../../domain/geometry/walls";
 import {
   getPlaceableFloorWalls,
   getWallObjectPlanRect,
-  WALL_OBJECT_PLAN_DEPTH_MM
+  WALL_OBJECT_PLAN_DEPTH_MM,
+  type PlanRect
 } from "../../../domain/geometry/planObjects";
 import {
   buildPlanScene,
   getPlanSceneObjectIdsIntersectingRect,
-  svgPolygonPoints
+  svgPolygonPoints,
+  type PlanSceneFloorObject
 } from "../../../domain/scene2d/planScene";
 import { withArtworkFootprintFromMap } from "../../../domain/framing";
 import { type InsertToolKind } from "../../../domain/placement/createOpening";
@@ -42,6 +44,7 @@ import {
 } from "../../../domain/geometry/freestandingWalls";
 import { computePartitionChainsFloor } from "../../../domain/geometry/partitionChains";
 import type { Point } from "../../../domain/geometry/polygon";
+import { assemblyPlanRect, resolveFloorSupport } from "../../../domain/geometry/supportGlyphs";
 import { getGridSnapTargets } from "../../../domain/snapping/gridSnapTargets";
 import {
   resolvePlanPlacement,
@@ -828,6 +831,13 @@ export function PlanView({
   // field — and a multi-selection gets none, because a group rotation is a
   // different gesture (each member would need its own pivot policy) and this
   // handle must not quietly imply it.
+  //
+  // `rect` is the WHOLE ASSEMBLY's footprint when the placement stands on a
+  // support (assemblyPlanRect): the handle hangs off the rect it is given, so
+  // anchoring it to the bare work rect would bury it inside the pedestal that
+  // is drawn around it. The rotation itself is unchanged — it still pivots
+  // about the placement, and the support travels with it because the offset is
+  // stored in the placement's rotated local frame.
   const rotateHandleTarget = useMemo(() => {
     if (exportMode) return null;
     const selected = planScene.floorObjects.filter(
@@ -835,7 +845,15 @@ export function PlanView({
         selectedObjectIds.includes(entry.object.id) ||
         (entry.object.kind === "artwork" && entry.object.artworkId === selectedArtworkId)
     );
-    return selected.length === 1 ? selected[0] : null;
+    if (selected.length !== 1) return null;
+    const entry = selected[0];
+    return {
+      object: entry.object,
+      // Evaluated at whatever rotation is live (committed, or a drag preview):
+      // an offset support's union rect moves as the placement turns, because
+      // the offset is stored in the rotated local frame.
+      rectAt: (rotationDeg: number): PlanRect => rotateHandleRectAt(entry, rotationDeg)
+    };
   }, [exportMode, planScene.floorObjects, selectedObjectIds, selectedArtworkId]);
   const {
     measureGestureRef,
@@ -1514,19 +1532,19 @@ export function PlanView({
           <FloorObjectRotateHandle
             handleSizeMm={handleSizeMm}
             isActive={rotateDrag?.objectId === rotateHandleTarget.object.id}
-            planRect={
+            planRect={rotateHandleTarget.rectAt(
               rotateDrag?.objectId === rotateHandleTarget.object.id
-                ? { ...rotateHandleTarget.rect, angleDeg: rotateDrag.previewRotationDeg }
-                : rotateHandleTarget.rect
-            }
+                ? rotateDrag.previewRotationDeg
+                : rotateHandleTarget.object.rotationDeg
+            )}
             onBeginDrag={(event) => {
               event.stopPropagation();
+              const startRect = rotateHandleTarget.rectAt(
+                rotateHandleTarget.object.rotationDeg
+              );
               startRotateDrag({
                 objectId: rotateHandleTarget.object.id,
-                centerMm: {
-                  xMm: rotateHandleTarget.rect.centerXMm,
-                  yMm: rotateHandleTarget.rect.centerYMm
-                },
+                centerMm: { xMm: startRect.centerXMm, yMm: startRect.centerYMm },
                 startRotationDeg: rotateHandleTarget.object.rotationDeg,
                 previewRotationDeg: rotateHandleTarget.object.rotationDeg
               });
@@ -1605,6 +1623,25 @@ function getPlanViewPaddingMm(bounds: { width: number; height: number }): number
 // (usePlanPartitionTool); re-exported here so PlanView.test.ts's import from
 // "./PlanView" keeps resolving unchanged.
 export { getPartitionMovedAxes };
+
+// The rect the rotate handle hangs off, at a given rotation: the WHOLE
+// ASSEMBLY's footprint (assemblyPlanRect) for a placement that stands on a
+// pedestal / plinth / monitor default, and the work's own rect otherwise. The
+// handle is drawn outside the rect it is given, so anchoring it to the bare
+// work rect would bury the stem and chip inside the support drawn around the
+// work. Taken at a rotation rather than read off the scene because an offset
+// support's union moves as the placement turns (the offset lives in the
+// placement's rotated local frame) — the drag preview has to re-evaluate it.
+// Exported only for unit testing; not a shared utility.
+export function rotateHandleRectAt(
+  entry: PlanSceneFloorObject,
+  rotationDeg: number
+): PlanRect {
+  const support = resolveFloorSupport(entry.object, entry.artwork);
+  return support
+    ? assemblyPlanRect({ ...entry.object, rotationDeg }, support)
+    : { ...entry.rect, angleDeg: rotationDeg };
+}
 
 // The padded floor bounds, expanded (never shrunk) so neither axis is
 // narrower than MIN_PLAN_FIT_EXTENT_MM — grown symmetrically around the

@@ -6,6 +6,7 @@ import {
   getWallObjectPlanRect
 } from "../../domain/geometry/planObjects";
 import { clamp } from "../../domain/geometry/scalar";
+import { normalizeFloorSupport } from "../../domain/geometry/supportGlyphs";
 import { isHangableWall } from "../../domain/geometry/wallCascade";
 import { newId } from "../../domain/id";
 import { effectiveFloorDepthMm, type PlacementForm } from "../../domain/placement/artworkForm";
@@ -491,6 +492,35 @@ export function createPlacementSlice(
       const monitorSizeMm = isMonitorArtwork(monitorArtwork)
         ? monitorBoxSizeMm(monitorArtwork?.dimensions)
         : undefined;
+
+      // The floor support and the monitor's pedestal choice, coming back out of
+      // the memory slot they were parked in at capture. Same absent-vs-present
+      // rule as imageFaces above: a work that never stood on anything must not
+      // acquire a support key here.
+      //
+      // The support is re-normalised against the dimensions the work is
+      // landing with, NOT restored verbatim: unlike baseHeightMm (which nothing
+      // on a wall can edit, so its memory cannot go stale), the work's own
+      // width/height ARE editable up there — and a monitor's cabinet is
+      // re-seeded on the way down — so a pedestal captured around a 400mm work
+      // would otherwise come back holding a 900mm one over its edges. The
+      // normaliser is idempotent, so an unchanged work restores its support
+      // unchanged.
+      const restoredMonitorSupport = wallObject.floorMemory?.monitorSupport;
+      const rememberedSupport = wallObject.floorMemory?.support;
+      const restoredDepthMm =
+        monitorSizeMm?.depthMm ?? floorDepthForWallArtwork(wallObject);
+      const restoredSupport = rememberedSupport
+        ? normalizeFloorSupport(
+            {
+              widthMm: monitorSizeMm?.widthMm ?? base.widthMm,
+              depthMm: restoredDepthMm,
+              heightMm: monitorSizeMm?.heightMm ?? base.heightMm
+            },
+            rememberedSupport
+          ).support
+        : undefined;
+
       newFloorObject = {
         ...base,
         ...(monitorSizeMm
@@ -508,7 +538,11 @@ export function createPlacementSlice(
         ...(wallObject.floorMemory?.imageFaces !== undefined
           ? { imageFaces: [...wallObject.floorMemory.imageFaces] }
           : {}),
-        depthMm: monitorSizeMm?.depthMm ?? floorDepthForWallArtwork(wallObject),
+        ...(restoredMonitorSupport !== undefined
+          ? { monitorSupport: restoredMonitorSupport }
+          : {}),
+        ...(restoredSupport !== undefined ? { support: restoredSupport } : {}),
+        depthMm: restoredDepthMm,
         ...(wallObject.displayDimensionsOverride
           ? { displayDimensionsOverride: wallObject.displayDimensionsOverride }
           : {})
@@ -608,6 +642,18 @@ export function createPlacementSlice(
         ...floorMemory,
         ...(floorObject.imageFaces !== undefined
           ? { imageFaces: [...floorObject.imageFaces] }
+          : {}),
+        // The pedestal/plinth the work was standing on, and the monitor's own
+        // absent-means-pedestal choice, parked under the same discipline: a
+        // support is a sized, curator-authored object, and a mis-drag onto a
+        // wall must not be the thing that deletes it. Copied rather than
+        // aliased for the same reason imageFaces is — the memory must not share
+        // an object with the live placement an undo snapshot still holds.
+        ...(floorObject.support !== undefined
+          ? { support: { ...floorObject.support } }
+          : {}),
+        ...(floorObject.monitorSupport !== undefined
+          ? { monitorSupport: floorObject.monitorSupport }
           : {})
       };
       newWallObject = {

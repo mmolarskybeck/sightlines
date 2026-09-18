@@ -8,9 +8,12 @@ afterEach(cleanup);
 function renderInspector(
   polygonLengthEditing: boolean,
   overrides: {
+    canSetNorth?: boolean;
     isOpenSide?: boolean;
     onOpenWall?: () => void;
+    onRenameWall?: (name: string) => void;
     onRestoreWall?: () => void;
+    onSetNorthWall?: () => void;
     onCommitHeight?: (heightMm: number) => Promise<void>;
   } = {}
 ) {
@@ -18,6 +21,7 @@ function renderInspector(
   render(
     <TooltipProvider>
       <WallInspector
+        canSetNorth={overrides.canSetNorth ?? false}
         centerlineMm={1450}
         changedWallNames={[]}
         dimensionLink={null}
@@ -28,7 +32,9 @@ function renderInspector(
         onCommitHeight={overrides.onCommitHeight ?? vi.fn()}
         onCommitLength={onCommitLength}
         onOpenWall={overrides.onOpenWall ?? vi.fn()}
+        onRenameWall={overrides.onRenameWall ?? vi.fn()}
         onRestoreWall={overrides.onRestoreWall ?? vi.fn()}
+        onSetNorthWall={overrides.onSetNorthWall ?? vi.fn()}
         polygonLengthEditing={polygonLengthEditing}
         roomName="Gallery 2"
         unit="cm"
@@ -176,5 +182,125 @@ describe("WallInspector wall length anchor", () => {
     fireEvent.blur(screen.getByRole("textbox", { name: "Length" }));
 
     await waitFor(() => expect(onCommitLength).toHaveBeenCalledWith(2000, "start"));
+  });
+});
+
+// The name field is the only prop-driven value in this inspector, so it gets a
+// harness that can re-render with a new committed name.
+function renderNamed(wallName: string) {
+  const onRenameWall = vi.fn();
+  const element = (name: string) => (
+    <TooltipProvider>
+      <WallInspector
+        centerlineMm={1450}
+        changedWallNames={[]}
+        dimensionLink={null}
+        lastGeometryEdit={null}
+        onAddCase={vi.fn()}
+        onAddOpening={vi.fn()}
+        onCommitHeight={vi.fn()}
+        onCommitLength={vi.fn().mockResolvedValue(undefined)}
+        onOpenWall={vi.fn()}
+        onRenameWall={onRenameWall}
+        onRestoreWall={vi.fn()}
+        onSetNorthWall={vi.fn()}
+        roomName="Gallery 2"
+        unit="cm"
+        wallHeightMm={3600}
+        wallLengthMm={1500}
+        wallName={name}
+      />
+    </TooltipProvider>
+  );
+  const view = render(element(wallName));
+  return { onRenameWall, rerender: (name: string) => view.rerender(element(name)) };
+}
+
+describe("WallInspector name field", () => {
+  it("commits a trimmed name on blur", () => {
+    const onRenameWall = vi.fn();
+    renderInspector(false, { onRenameWall });
+
+    const field = screen.getByLabelText("Name");
+    fireEvent.change(field, { target: { value: "  Entrance wall  " } });
+    fireEvent.blur(field);
+
+    expect(onRenameWall).toHaveBeenCalledWith("Entrance wall");
+  });
+
+  it("commits on Enter", () => {
+    const onRenameWall = vi.fn();
+    renderInspector(false, { onRenameWall });
+
+    const field = screen.getByLabelText("Name");
+    fireEvent.change(field, { target: { value: "Entrance wall" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    fireEvent.blur(field);
+
+    expect(onRenameWall).toHaveBeenCalledWith("Entrance wall");
+  });
+
+  it("reverts a pending edit on Escape and commits nothing", () => {
+    const onRenameWall = vi.fn();
+    renderInspector(false, { onRenameWall });
+
+    const field = screen.getByLabelText("Name");
+    fireEvent.change(field, { target: { value: "Entrance wall" } });
+    fireEvent.keyDown(field, { key: "Escape" });
+
+    expect(field).toHaveValue("Wall 3");
+    fireEvent.blur(field);
+    expect(onRenameWall).not.toHaveBeenCalled();
+  });
+
+  // The inspector is keyed on the wall id, so a rename from the rooms panel
+  // (or an undo) keeps it mounted — the draft has to follow the store, or a
+  // later blur would commit the stale name back over it.
+  it("resyncs when the name changes out from under it", () => {
+    const { rerender } = renderNamed("Wall 3");
+
+    rerender("Entrance wall");
+
+    expect(screen.getByLabelText("Name")).toHaveValue("Entrance wall");
+  });
+
+  // A wall must always be named, so an empty field is a revert, not a clear.
+  it("restores the committed name rather than clearing it", () => {
+    const onRenameWall = vi.fn();
+    renderInspector(false, { onRenameWall });
+
+    const field = screen.getByLabelText("Name");
+    fireEvent.change(field, { target: { value: "   " } });
+    fireEvent.blur(field);
+
+    expect(field).toHaveValue("Wall 3");
+    expect(onRenameWall).not.toHaveBeenCalled();
+  });
+});
+
+describe("WallInspector North wall action", () => {
+  it("offers Use as North wall only for a room that can carry a compass", () => {
+    const onSetNorthWall = vi.fn();
+    renderInspector(false, { canSetNorth: true, onSetNorthWall });
+
+    fireEvent.click(screen.getByRole("button", { name: "Use as North wall" }));
+    expect(onSetNorthWall).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides it when the room is not a quadrilateral", () => {
+    renderInspector(false);
+    expect(
+      screen.queryByRole("button", { name: "Use as North wall" })
+    ).not.toBeInTheDocument();
+  });
+
+  // The wall record survives opening, so it can still be the room's north.
+  it("keeps it on an open wall, where Open this wall is gone", () => {
+    renderInspector(false, { canSetNorth: true, isOpenSide: true });
+
+    expect(screen.getByRole("button", { name: "Use as North wall" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Open this wall" })
+    ).not.toBeInTheDocument();
   });
 });

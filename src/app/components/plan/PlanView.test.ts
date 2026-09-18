@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { FloorWall } from "../../../domain/geometry/planObjects";
+import { getFloorObjectPlanRect, type FloorWall } from "../../../domain/geometry/planObjects";
+import {
+  CURRENT_ARTWORK_SCHEMA_VERSION,
+  type Artwork,
+  type ArtworkFloorObject
+} from "../../../domain/project";
+import type { PlanSceneFloorObject } from "../../../domain/scene2d/planScene";
 import { buildPlanScene } from "../../../domain/scene2d/planScene";
 import { createSampleProject } from "../../../domain/sample/sampleProject";
 import type { PlanGroupMember } from "../../../domain/snapping/planGroupMove";
@@ -13,7 +19,7 @@ import {
   planMeasurementCancelAction,
   shouldCancelMeasurementForViewportClaim
 } from "../../hooks/planMeasurementPolicy";
-import { clampFitExtent, getPartitionMovedAxes } from "./PlanView";
+import { clampFitExtent, getPartitionMovedAxes, rotateHandleRectAt } from "./PlanView";
 
 // Same FloorWall builder shape as planGroupMove.test.ts (offset 0 baked in).
 function makeWall(
@@ -340,5 +346,105 @@ describe("clampFitExtent", () => {
     expect(result.height).toBe(9144);
     expect(result.x + result.width / 2).toBeCloseTo(centerX);
     expect(result.y + result.height / 2).toBeCloseTo(centerY);
+  });
+});
+
+// rotateHandleRectAt is what the rotate handle hangs off. The bug it exists to
+// prevent: a sculpture on a pedestal keeps the handle anchored to the WORK's
+// rect, so the stem and chip are drawn inside the pedestal painted around it.
+describe("rotateHandleRectAt", () => {
+  function floorArtwork(
+    support?: ArtworkFloorObject["support"],
+    rotationDeg = 0
+  ): ArtworkFloorObject {
+    return {
+      id: "fo-1",
+      kind: "artwork",
+      artworkId: "art-1",
+      xMm: 1000,
+      yMm: 2000,
+      widthMm: 400,
+      depthMm: 300,
+      heightMm: 900,
+      rotationDeg,
+      wallYMm: 1450,
+      ...(support ? { support } : {})
+    };
+  }
+
+  function entry(object: ArtworkFloorObject): PlanSceneFloorObject {
+    return { object, rect: getFloorObjectPlanRect(object) };
+  }
+
+  it("is the work's own rect at the given angle when nothing is under the work", () => {
+    const object = floorArtwork();
+
+    const rect = rotateHandleRectAt(entry(object), 45);
+
+    expect(rect.centerXMm).toBeCloseTo(1000, 6);
+    expect(rect.centerYMm).toBeCloseTo(2000, 6);
+    expect(rect.widthMm).toBe(400);
+    expect(rect.depthMm).toBe(300);
+    expect(rect.angleDeg).toBe(45);
+  });
+
+  it("grows to the whole assembly's footprint for a work on a pedestal", () => {
+    const object = floorArtwork({
+      kind: "pedestal",
+      widthMm: 600,
+      depthMm: 500,
+      heightMm: 1100
+    });
+
+    const rect = rotateHandleRectAt(entry(object), 0);
+
+    // The pedestal contains the work (overhang off), so the union IS the
+    // pedestal — wide enough that the handle clears it.
+    expect(rect.widthMm).toBeCloseTo(600, 6);
+    expect(rect.depthMm).toBeCloseTo(500, 6);
+    expect(rect.centerXMm).toBeCloseTo(1000, 6);
+    expect(rect.centerYMm).toBeCloseTo(2000, 6);
+  });
+
+  it("re-evaluates an offset support's union at the rotation it is asked for", () => {
+    const object = floorArtwork({
+      kind: "plinth",
+      widthMm: 1200,
+      depthMm: 400,
+      heightMm: 150,
+      offsetXMm: 300,
+      overhangAllowed: true
+    });
+
+    const atZero = rotateHandleRectAt(entry(object), 0);
+    const atNinety = rotateHandleRectAt(entry(object), 90);
+
+    // Union at 0°: local x from -300 (plinth left edge) to 900 (plinth right
+    // edge), i.e. the plinth alone — it overhangs the work on one side only.
+    expect(atZero.widthMm).toBeCloseTo(1200, 6);
+    expect(atZero.centerXMm).toBeCloseTo(1000 + 300, 6);
+    expect(atZero.centerYMm).toBeCloseTo(2000, 6);
+    // The offset lives in the placement's rotated local frame, so a preview
+    // rotation moves the union's center — the same box, turned.
+    expect(atNinety.widthMm).toBeCloseTo(1200, 6);
+    expect(atNinety.angleDeg).toBe(90);
+    expect(atNinety.centerXMm).toBeCloseTo(1000, 6);
+    expect(atNinety.centerYMm).toBeCloseTo(2000 + 300, 6);
+  });
+
+  it("anchors to a box monitor's resolved default pedestal, whose footprint is the cabinet", () => {
+    const object = floorArtwork();
+    const artwork: Artwork = {
+      id: "art-1",
+      schemaVersion: CURRENT_ARTWORK_SCHEMA_VERSION,
+      dimensions: { status: "unknown" },
+      displayAs: "monitor",
+      metadata: {}
+    };
+
+    const rect = rotateHandleRectAt({ ...entry(object), artwork }, 0);
+
+    expect(rect.widthMm).toBeCloseTo(400, 6);
+    expect(rect.depthMm).toBeCloseTo(300, 6);
   });
 });
