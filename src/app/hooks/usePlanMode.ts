@@ -102,7 +102,10 @@ export function usePlanMode(viewMode: ViewMode, selectedRoomId: string | null): 
       if (
         viewMode === "elevation" &&
         // The display case is plan-only, so it does NOT survive the hop to
-        // elevation the way doors/windows/wall-text/measure do.
+        // elevation the way doors/windows/wall-text/measure do. The SHELF is
+        // deliberately absent from that exclusion: it is a wall object placed
+        // at a height, so elevation is where a curator would most want to put
+        // one, and an armed shelf tool carries across both 2D surfaces.
         ((current.kind === "placeOpening" && current.tool !== "case") ||
           current.kind === "measure")
       ) {

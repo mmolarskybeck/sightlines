@@ -13,7 +13,7 @@
 // is unit-testable without a canvas.
 
 import { projectPointToWall, type FloorWall } from "../../../domain/geometry/planObjects";
-import type { Project } from "../../../domain/project";
+import type { Project, WallObject } from "../../../domain/project";
 import {
   resolveThreeDrop,
   worldHeightToMm,
@@ -29,6 +29,12 @@ export type ThreeDragSource =
   | {
       anchor: "wall";
       objectId: string;
+      // What is being dragged. Only an ARTWORK can stand on a shelf (a rider is
+      // an artwork by definition, shelfRiders.ts), so this is what decides
+      // whether the drag is offered shelf seating at all — a wall case sliding
+      // past a slab must not be snapped onto it. Optional so a caller with no
+      // kind to hand (tests, older call sites) keeps the un-seated behaviour.
+      kind?: WallObject["kind"];
       wallId: string;
       // Wall-local centre along the wall, and centre height above the floor —
       // exactly the pair the store persists.
@@ -49,7 +55,15 @@ export type ThreeDragSource =
 // (unlike plan's PlanPlacement, which has no notion of hang height) because a
 // 3D drag moves the work in BOTH wall axes at once.
 export type ThreeDragMove =
-  | { anchor: "wall"; wallId: string; xMm: number; yMm: number }
+  | {
+      anchor: "wall";
+      wallId: string;
+      xMm: number;
+      yMm: number;
+      // The shelf this move stands the work ON, when the drag was captured by
+      // one. The view lights that slab up for the rest of the gesture.
+      shelfId?: string;
+    }
   | { anchor: "floor"; xMm: number; yMm: number };
 
 // What the raycast found under the cursor, in the shape pickDropSurface returns.
@@ -124,6 +138,11 @@ export function resolveDragMove(args: {
   source: ThreeDragSource;
   offsetMm: { xMm: number; yMm: number };
   walls: readonly FloorWall[];
+  // Shelf seating, forwarded to resolveThreeDrop. Opt-in from the view, which
+  // also drops it while the precision-bypass modifier is held; gated again here
+  // on the source being an artwork, because only an artwork can be a rider.
+  wallObjects?: readonly WallObject[];
+  seatOnShelves?: boolean;
 }): ThreeDragMove | null {
   const { surface, source, offsetMm, walls } = args;
   if (!surface) return null;
@@ -147,7 +166,10 @@ export function resolveDragMove(args: {
     tag: surface.tag,
     walls,
     dims: source.dims,
-    offsetMm: surface.tag.wallId === source.wallId ? offsetMm : { xMm: 0, yMm: 0 }
+    offsetMm: surface.tag.wallId === source.wallId ? offsetMm : { xMm: 0, yMm: 0 },
+    wallObjects: args.wallObjects,
+    seatOnShelves: Boolean(args.seatOnShelves) && source.kind === "artwork",
+    movingId: source.objectId
   });
   // null here means the hit wall isn't placeable (an open wall, or one from a
   // stale scene) — the drag holds its last placement rather than committing to
@@ -157,7 +179,8 @@ export function resolveDragMove(args: {
     anchor: "wall",
     wallId: resolved.wallId,
     xMm: resolved.xMm,
-    yMm: resolved.yMm
+    yMm: resolved.yMm,
+    shelfId: resolved.shelfId
   };
 }
 

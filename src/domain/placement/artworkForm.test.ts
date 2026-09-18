@@ -6,7 +6,8 @@ import {
   type ArtworkWallObject,
   type CaseWallObject,
   type Dimensions,
-  type DoorWallObject
+  type DoorWallObject,
+  type ShelfWallObject
 } from "../project";
 import { WALL_OBJECT_PLAN_DEPTH_MM } from "../geometry/planObjects";
 import { getArtworkOuterDimensionsMm } from "../framing";
@@ -272,6 +273,20 @@ describe("effectiveWallObjectPlanDepthMm — one plan depth for every wall objec
 
   it("gives a case its real protrusion", () => {
     expect(effectiveWallObjectPlanDepthMm(wallCase, undefined)).toBe(450);
+  });
+
+  it("gives a shelf its real protrusion — the same branch as a case", () => {
+    const shelf: ShelfWallObject = {
+      id: "wo-shelf",
+      kind: "shelf",
+      wallId: "wall-1",
+      xMm: 2000,
+      yMm: 1180,
+      widthMm: 1200,
+      heightMm: 40,
+      depthMm: 300
+    };
+    expect(effectiveWallObjectPlanDepthMm(shelf, undefined)).toBe(300);
   });
 
   it("gives a deep work its real protrusion", () => {

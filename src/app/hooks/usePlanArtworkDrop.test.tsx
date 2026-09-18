@@ -12,7 +12,7 @@ import { act, renderHook } from "@testing-library/react";
 import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { getFloorWalls } from "../../domain/geometry/planObjects";
-import type { Artwork } from "../../domain/project";
+import type { Artwork, Project, ShelfWallObject } from "../../domain/project";
 import { createSampleProject } from "../../domain/sample/sampleProject";
 import { ARTWORK_DRAG_MIME } from "../components/library/artworkDragSession";
 import { usePlanArtworkDrop } from "./usePlanArtworkDrop";
@@ -48,7 +48,7 @@ const NORTH_WALL = walls.find((wall) => wall.id === "wall-north")!;
 const NEAR_WALL_MM = { xMm: 4000, yMm: 10 };
 const OPEN_FLOOR_MM = { xMm: 4000, yMm: 2500 };
 
-function setup(artwork: Artwork) {
+function setup(artwork: Artwork, dropProject: Project = project) {
   const onPlaceArtwork = vi.fn();
   const onPlaceArtworkOnFloor = vi.fn();
   const hook = renderHook(() =>
@@ -59,7 +59,7 @@ function setup(artwork: Artwork) {
       // The pointer coordinates ARE floor mm in this harness — the client→SVG
       // conversion is PlanView's, not this hook's.
       toSvgMm: (clientX, clientY) => ({ xMm: clientX, yMm: clientY }),
-      project,
+      project: dropProject,
       floorWallsForTool: walls,
       snappingWallObjects: [],
       floorObjectRoomIds: new Map(),
@@ -76,11 +76,15 @@ function setup(artwork: Artwork) {
 
 // A minimal drag event: jsdom has no DataTransfer, and the handlers only read
 // `types` / `getData` and write `dropEffect`.
-function dragEvent(artworkId: string, pointMm: { xMm: number; yMm: number }) {
+function dragEvent(
+  artworkId: string,
+  pointMm: { xMm: number; yMm: number },
+  bypassSnap = false
+) {
   return {
     clientX: pointMm.xMm,
     clientY: pointMm.yMm,
-    metaKey: false,
+    metaKey: bypassSnap,
     ctrlKey: false,
     preventDefault: () => {},
     currentTarget: { contains: () => false },
@@ -157,5 +161,79 @@ describe("plan checklist drop — the drop point decides the surface", () => {
     const ghost = hook.result.current.dropGhost!;
     expect(ghost.placement).toMatchObject({ anchor: "wall" });
     expect(ghost.planRect.widthMm).toBe(700);
+  });
+});
+
+// A 1200-wide slab on the north wall, centred under the drop point, top face
+// at 1000mm (yMm is the slab CENTRE, heightMm its thickness).
+const SHELF: ShelfWallObject = {
+  id: "shelf-1",
+  kind: "shelf",
+  wallId: "wall-north",
+  xMm: 4000,
+  yMm: 980,
+  widthMm: 1200,
+  heightMm: 40,
+  depthMm: 300
+};
+const PROJECT_WITH_SHELF: Project = { ...project, wallObjects: [...project.wallObjects, SHELF] };
+
+describe("plan checklist drop — a shelf under the drop point takes the work", () => {
+  // Plan has no vertical axis, so before this the shelf was the one surface a
+  // work could not be aimed at from plan: every wall drop went to the
+  // centerline, even over a slab's own footprint.
+  it("stands the work on the slab instead of hanging it at the centerline", () => {
+    const { hook, onPlaceArtwork } = setup(FLAT_WALL_WORK, PROJECT_WITH_SHELF);
+
+    act(() => {
+      hook.result.current.handleArtworkDragOver(dragEvent(FLAT_WALL_WORK.id, NEAR_WALL_MM));
+    });
+    // The ghost names the slab, so the plan glyph can light up under the cursor.
+    expect(hook.result.current.dropGhost!.shelfId).toBe("shelf-1");
+
+    act(() => {
+      hook.result.current.handleArtworkDrop(dragEvent(FLAT_WALL_WORK.id, NEAR_WALL_MM));
+    });
+
+    const [, wallId, , yMm] = onPlaceArtwork.mock.calls[0]!;
+    expect(wallId).toBe(NORTH_WALL.id);
+    // Top face (1000) + half the FRAMED outer height (900 + 2 * 50 = 1000):
+    // the framed outer bottom edge stands on the slab's top face, which is the
+    // same seated placement elevation produces and the same edge getShelfRiders
+    // measures — so the slab actually carries this work.
+    expect(yMm).toBe(1500);
+    expect(yMm).not.toBe(project.defaultCenterlineHeightMm);
+  });
+
+  it("⌘/Ctrl hangs it freely, and the ghost stops claiming the shelf", () => {
+    const { hook, onPlaceArtwork } = setup(FLAT_WALL_WORK, PROJECT_WITH_SHELF);
+
+    act(() => {
+      hook.result.current.handleArtworkDragOver(dragEvent(FLAT_WALL_WORK.id, NEAR_WALL_MM, true));
+    });
+    expect(hook.result.current.dropGhost!.shelfId).toBeUndefined();
+
+    act(() => {
+      hook.result.current.handleArtworkDrop(dragEvent(FLAT_WALL_WORK.id, NEAR_WALL_MM, true));
+    });
+
+    expect(onPlaceArtwork.mock.calls[0]![3]).toBe(project.defaultCenterlineHeightMm);
+  });
+
+  it("leaves a drop clear of the slab's span at the centerline", () => {
+    const { hook, onPlaceArtwork } = setup(FLAT_WALL_WORK, PROJECT_WITH_SHELF);
+
+    // 2000mm along the wall: the work spans 1700..2300, the slab 3400..4600.
+    const clearOfShelf = { xMm: 2000, yMm: 10 };
+    act(() => {
+      hook.result.current.handleArtworkDragOver(dragEvent(FLAT_WALL_WORK.id, clearOfShelf));
+    });
+    expect(hook.result.current.dropGhost!.shelfId).toBeUndefined();
+
+    act(() => {
+      hook.result.current.handleArtworkDrop(dragEvent(FLAT_WALL_WORK.id, clearOfShelf));
+    });
+
+    expect(onPlaceArtwork.mock.calls[0]![3]).toBe(project.defaultCenterlineHeightMm);
   });
 });

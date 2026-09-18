@@ -14,12 +14,13 @@ import {
 } from "../../domain/snapping/planSnapTargets";
 import { resolveSnap, type Guide } from "../../domain/snapping/resolveSnap";
 import {
-  artworkMemberWallIds,
   getPlanGroupCenterMm,
-  resolvePlanGroupMemberMove,
+  reanchorableMemberWallIds,
+  resolvePlanGroupMove,
   resolvePlanGroupReanchorWall,
   type PlanGroupMember
 } from "../../domain/snapping/planGroupMove";
+import { expandWithShelfRiders, getShelfRiders } from "../../domain/placement/shelfRiders";
 import type { Artwork, Project, WallObject, WallObjectBase } from "../../domain/project";
 import { effectiveWallObjectPlanDepthMm } from "../../domain/placement/artworkForm";
 import { useDragGesture } from "./useDragGesture";
@@ -30,7 +31,7 @@ import type { ObjectDragState } from "../components/plan/types";
 // two pieces that arm it — beginObjectDrag (resolves live group members and
 // hands the gesture its initial state) and floatPolicyForMovingObject (the
 // wall/floor float policy for the pressed object). Preview and commit both flow
-// through resolvePlanPlacement / resolvePlanGroupMemberMove, so what the user
+// through resolvePlanPlacement / resolvePlanGroupMove, so what the user
 // sees dragging is exactly what lands.
 //
 // Same deferred-closure story as the raw useDragGesture config used to have:
@@ -154,15 +155,20 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
         const reanchorWall = resolvePlanGroupReanchorWall({
           groupCenterMm: snappedGroupCenterMm,
           walls: floorWallsForTool,
-          memberWallIds: artworkMemberWallIds(current.members),
+          memberWallIds: reanchorableMemberWallIds(current.members),
           captureDistanceMm,
           previousTargetWallId: current.previewReanchorWall?.id ?? null
         });
 
+        // Through the GROUP entry, not member by member: a shelf and the works
+        // standing on it are ONE rigid body, so their offsets are applied from
+        // the shelf's resolved position and the union clamps once (a per-member
+        // clamp is what squashes an assembly against a wall end). Everything
+        // else falls through to the same per-member helper as before.
         const previewRectById = new Map<string, PlanRect>(
-          current.members.map((member) => [
-            member.id,
-            resolvePlanGroupMemberMove(member, deltaMm, reanchorWall).rect
+          resolvePlanGroupMove(current.members, deltaMm, reanchorWall).moves.map((move) => [
+            move.id,
+            move.rect
           ])
         );
 
@@ -237,8 +243,11 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
         // Same target wall the last preview frame resolved, so the committed
         // re-anchor matches exactly what the user saw glued to the wall.
         const reanchorWall = current.previewReanchorWall ?? null;
-        const moves = current.members.map(
-          (member) => resolvePlanGroupMemberMove(member, deltaMm, reanchorWall).commit
+        // The same one pass the preview ran, so the committed positions are
+        // exactly the rects the user was looking at — including a shelf
+        // assembly's refusal to re-anchor onto a wall it does not fit.
+        const moves = resolvePlanGroupMove(current.members, deltaMm, reanchorWall).moves.map(
+          (move) => move.commit
         );
         onCommitPlanMoveGroup?.(moves);
         return;
@@ -271,6 +280,14 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
       const isFloorCase = project.floorObjects.some((object) => object.id === objectId);
       return isFloorCase ? "floor-only" : "capture-any";
     }
+    // A shelf is WALL-ONLY: there is no floor shelf to convert into. Its
+    // "float" policy (floatPolicyForKind) belongs to PLACEMENT, where a click
+    // clear of every wall has to resolve to a floor anchor the store can refuse
+    // with a hint. Moving one is the opposite situation — it is already on a
+    // wall — so it slides along walls like a wall case, and a drag into open
+    // floor can never resolve to a conversion that planMoveWallToFloor would
+    // throw on.
+    if (kind === "shelf") return "capture-any";
     // Artwork floats BOTH ways, deliberately ignoring the library record's
     // placementForm (USER DECISION, reversing the earlier wall-only rule — see
     // floatPolicyForKind's scope note). Dragging a hung work out into open floor
@@ -311,15 +328,45 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
     const startPointerMm = toSvgMm(event.clientX, event.clientY);
     if (!startPointerMm) return;
 
-    // Group drag: the pressed object is part of a multi-selection. Resolve live
-    // members from BOTH wall objects (world center via getWallObjectPlanRect —
-    // stale ids or objects whose wall vanished drop out) and floor objects.
-    if (selectedObjectIds.includes(params.objectId) && selectedObjectIds.length > 1) {
+    // The MOVING SET: the multi-selection when the press is part of one,
+    // otherwise just the pressed object — then every shelf in it contributes
+    // the works standing on it (shelfRiders.ts). So pressing a shelf turns the
+    // gesture into a group move over the assembly even with nothing else
+    // selected, which is the whole point: a slab that slid out from under its
+    // works would be a lie about the room.
+    const baseIds =
+      selectedObjectIds.includes(params.objectId) && selectedObjectIds.length > 1
+        ? selectedObjectIds
+        : [params.objectId];
+    const movingIds = new Set(
+      expandWithShelfRiders(baseIds, project.wallObjects, artworksById)
+    );
+
+    // Which shelf each rider is standing on, derived HERE at drag start and
+    // declared on the member (PlanGroupMember.ridesShelfId) — never stored.
+    // It is what lets resolvePlanGroupMove keep the assembly rigid instead of
+    // projecting and clamping each work on its own. A work overlapping two
+    // slabs rides the first: it stands on one surface, and picking
+    // deterministically beats splitting the assembly.
+    const shelfIdByRiderId = new Map<string, string>();
+    for (const object of project.wallObjects) {
+      if (object.kind !== "shelf" || !movingIds.has(object.id)) continue;
+      for (const rider of getShelfRiders(object, project.wallObjects, artworksById)) {
+        if (!movingIds.has(rider.id) || shelfIdByRiderId.has(rider.id)) continue;
+        shelfIdByRiderId.set(rider.id, object.id);
+      }
+    }
+
+    // Group drag: the moving set has more than one member — a multi-selection,
+    // or a shelf carrying riders. Resolve live members from BOTH wall objects
+    // (world center via getWallObjectPlanRect — stale ids or objects whose wall
+    // vanished drop out) and floor objects.
+    {
       const wallsById = new Map(floorWallsForTool.map((wall) => [wall.id, wall]));
       const members: PlanGroupMember[] = [];
 
       for (const object of project.wallObjects) {
-        if (!selectedObjectIds.includes(object.id)) continue;
+        if (!movingIds.has(object.id)) continue;
         const wall = wallsById.get(object.wallId);
         if (!wall) continue;
         // The member's real plan protrusion, not the nominal band: a case (or a
@@ -330,6 +377,7 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
           object.kind === "artwork" ? artworksById?.get(object.artworkId) : undefined
         );
         const rest = getWallObjectPlanRect(wall, object, depthMm);
+        const ridesShelfId = shelfIdByRiderId.get(object.id);
         members.push({
           id: object.id,
           anchor: "wall",
@@ -337,11 +385,12 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
           wall,
           worldCenterMm: { xMm: rest.centerXMm, yMm: rest.centerYMm },
           widthMm: object.widthMm,
-          depthMm
+          depthMm,
+          ...(ridesShelfId ? { ridesShelfId } : {})
         });
       }
       for (const object of project.floorObjects) {
-        if (!selectedObjectIds.includes(object.id)) continue;
+        if (!movingIds.has(object.id)) continue;
         members.push({
           id: object.id,
           anchor: "floor",
@@ -355,9 +404,9 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
       if (members.length > 1) {
         const groupCenterMm = getPlanGroupCenterMm(members);
         const previewRectById = new Map<string, PlanRect>(
-          members.map((member) => [
-            member.id,
-            resolvePlanGroupMemberMove(member, { xMm: 0, yMm: 0 }).rect
+          resolvePlanGroupMove(members, { xMm: 0, yMm: 0 }).moves.map((move) => [
+            move.id,
+            move.rect
           ])
         );
         startObjectDrag({

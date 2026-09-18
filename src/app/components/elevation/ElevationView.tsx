@@ -63,6 +63,7 @@ import { ElevationArtwork } from "./ElevationArtwork";
 import { ElevationOpening } from "./ElevationOpening";
 import { ElevationCase, ElevationFloorCaseGhost } from "./ElevationCase";
 import { ElevationPartitionProfile } from "./ElevationPartitionProfile";
+import { ElevationShelf } from "./ElevationShelf";
 import { ElevationSuspendedArtworkGhost } from "./ElevationSuspendedArtworkGhost";
 import { ElevationSupportedArtworkGhost } from "./ElevationSupportedArtworkGhost";
 import { ElevationMonitorGhost } from "./ElevationMonitorGhost";
@@ -71,6 +72,7 @@ import {
   ArtworkTooltipContent,
   CaseTooltipContent,
   OpeningTooltipContent,
+  ShelfTooltipContent,
   WallTextTooltipContent
 } from "../shared/PlacementTooltip";
 import { marqueeRectMm } from "../shared/marqueeRect";
@@ -234,7 +236,13 @@ export function ElevationView({
   // and stay hard regardless. Defaults false so pre-wiring behaves as the gate.
   allowOverlappingPlacement?: boolean;
   draggingArtworkId?: string | null;
-  onPlaceArtwork?: (artworkId: string, wallId: string, xMm: number, yMm: number) => void;
+  onPlaceArtwork?: (
+    artworkId: string,
+    wallId: string,
+    xMm: number,
+    yMm: number,
+    seatOnShelfId?: string
+  ) => void;
   onMovePlacement?: (wallObjectId: string, xMm: number, yMm: number) => void;
   onMoveOpening?: (wallObjectId: string, xMm: number, yMm: number) => void;
   // Commits a group drag in ONE call — every member's final center, artworks
@@ -506,11 +514,27 @@ export function ElevationView({
   // this view's shared machinery (beginMoveDrag, onSelectObject below), so
   // they need to be visible to it — snap neighbors, measurement points,
   // marquee hit-testing, and dimension lines all derive from this array.
+  // The stored records behind elevationScene.shelves. A shelf entry carries an
+  // objectId and a SPAN rather than the object (a slab is drawn as a band, not
+  // as a centre + size box), so the record is recovered from the same list the
+  // scene was built from — the scene still decides which shelves are on this
+  // wall, this only says what each entry stands for. Shelves belong in the pool
+  // below for the same reason cases do: they snap, select, drag and carry
+  // riders through this view's shared machinery.
+  const shelfObjectsById = new Map(
+    effectiveWallObjects
+      .filter((object) => object.kind === "shelf")
+      .map((object) => [object.id, object])
+  );
   const wallObjectsOnThisWall: WallObject[] = [
     ...elevationScene.artworks.map((entry) => entry.object),
     ...elevationScene.openings.map((entry) => entry.object),
     ...elevationScene.wallTexts.map((entry) => entry.object),
-    ...elevationScene.cases.map((entry) => entry.object)
+    ...elevationScene.cases.map((entry) => entry.object),
+    ...elevationScene.shelves.flatMap((entry) => {
+      const object = shelfObjectsById.get(entry.objectId);
+      return object ? [object] : [];
+    })
   ];
 
   const measurementSources = useMemo<MeasureCandidateSources>(() => {
@@ -614,6 +638,7 @@ export function ElevationView({
     beginMoveDrag
   } = useElevationMoveDrag({
     toWallLocalMm,
+    wallId: wallId ?? null,
     wallObjectsOnThisWall,
     artworksById,
     withResolvedArtworkFootprint,
@@ -693,6 +718,15 @@ export function ElevationView({
 
   const activeGuides =
     moveDrag?.activeGuides ?? dropGhost?.activeGuides ?? openingToolGhost?.activeGuides ?? [];
+
+  // The shelf a work is currently captured on, read straight off the winning
+  // guide so the slab's highlight and the guide line can never disagree. One
+  // derivation covers both the pointer move-drag and the checklist drop-ghost,
+  // because `activeGuides` above already merges those two sources.
+  const SHELF_GUIDE_PREFIX = "shelf-top:";
+  const snapTargetShelfId = activeGuides
+    .find((guide) => guide.targetId.startsWith(SHELF_GUIDE_PREFIX))
+    ?.targetId.slice(SHELF_GUIDE_PREFIX.length);
 
   // Preview center per object being moved, id → center. Covers the single
   // dragged object, or every group member (member center = the snapped group
@@ -1154,6 +1188,68 @@ export function ElevationView({
             />
           );
         })}
+        {elevationScene.shelves.map((entry) => {
+          // The scene entry states the slab's SPAN; this is the one place it is
+          // read as a centre + size, because that is the shape the live drag
+          // preview (previewCenterById) speaks and the shape every other
+          // elevation object is drawn from. No geometry is re-derived — the
+          // span came from shelfElevationGlyph.
+          const restCenterMm = {
+            xMm: (entry.xMinMm + entry.xMaxMm) / 2,
+            yMm: entry.yMm
+          };
+          const size = {
+            widthMm: entry.xMaxMm - entry.xMinMm,
+            heightMm: entry.heightMm
+          };
+          const previewCenter = previewCenterById.get(entry.objectId);
+          const center = previewCenter ?? restCenterMm;
+          const shelf = shelfObjectsById.get(entry.objectId);
+
+          return (
+            <ElevationShelf
+              key={entry.objectId}
+              center={center}
+              isOutOfBounds={isArtworkOutOfWallBounds(wallLengthMm, wallHeightMm, center, size)}
+              isSelected={
+                !exportMode &&
+                (selectedOpeningId === entry.objectId ||
+                  selectedObjectIds.includes(entry.objectId))
+              }
+              isSnapTarget={!exportMode && snapTargetShelfId === entry.objectId}
+              size={size}
+              tooltip={
+                shelf?.kind === "shelf" ? (
+                  <ShelfTooltipContent
+                    depthMm={shelf.depthMm}
+                    unit={unit}
+                    widthMm={shelf.widthMm}
+                  />
+                ) : undefined
+              }
+              tooltipDisabled={exportMode || Boolean(moveDrag || dropGhost)}
+              wallHeightMm={wallHeightMm}
+              onPointerDown={(event) => {
+                if (canvasToolArmed) {
+                  event.stopPropagation();
+                  return;
+                }
+                if (shelf) beginMoveDrag(shelf, event);
+              }}
+              onSelect={(event) => {
+                if (canvasToolArmed) return;
+                if (consumeSelectSuppression()) return;
+                if (onSelectObject) {
+                  onSelectObject(entry.objectId, {
+                    additive: event.shiftKey || event.metaKey || event.ctrlKey
+                  });
+                } else {
+                  onSelectOpening?.(entry.objectId);
+                }
+              }}
+            />
+          );
+        })}
         {elevationScene.cases.map(({ object: displayCase, centerMm, sizeMm, outOfBounds }) => {
           const previewCenter = previewCenterById.get(displayCase.id);
           const center = previewCenter ?? centerMm;
@@ -1245,6 +1341,13 @@ export function ElevationView({
               size={openingToolGhost.sizeMm}
               wallHeightMm={wallHeightMm}
             />
+          ) : activeTool === "shelf" ? (
+            <ElevationShelf
+              center={openingToolGhost.centerMm}
+              isGhost
+              size={openingToolGhost.sizeMm}
+              wallHeightMm={wallHeightMm}
+            />
           ) : (
             <ElevationOpening
               center={openingToolGhost.centerMm}
@@ -1301,19 +1404,56 @@ export function ElevationView({
             })()
           : null}
         {!exportMode &&
-          activeGuides.map((guide) => (
-            <line
-              className="snap-guide"
-              key={guide.id}
-              x1={guide.axis === "x" ? guide.positionMm : 0}
-              y1={guide.axis === "y" ? wallLocalYToSvgY(wallHeightMm, guide.positionMm) : 0}
-              x2={guide.axis === "x" ? guide.positionMm : wallLengthMm}
-              y2={
-                guide.axis === "y" ? wallLocalYToSvgY(wallHeightMm, guide.positionMm) : wallHeightMm
-              }
-              vectorEffect="non-scaling-stroke"
-            />
-          ))}
+          activeGuides.map((guide) => {
+            // A guide with an extent is clipped to the geometry it represents
+            // (a shelf-top guide runs exactly the slab's span), so it reads as
+            // "this surface" rather than as the full-wall centerline. Guides
+            // without one keep spanning the whole wall, as they always have.
+            const extent = guide.extentMm;
+            const isVertical = guide.axis === "x";
+            const guideSvgY = isVertical
+              ? undefined
+              : wallLocalYToSvgY(wallHeightMm, guide.positionMm);
+            const isShelfGuide = guide.targetId.startsWith(SHELF_GUIDE_PREFIX);
+            return (
+              <g key={guide.id}>
+                <line
+                  className="snap-guide"
+                  x1={isVertical ? guide.positionMm : (extent?.startMm ?? 0)}
+                  y1={
+                    isVertical
+                      ? extent
+                        ? wallLocalYToSvgY(wallHeightMm, extent.endMm)
+                        : 0
+                      : guideSvgY
+                  }
+                  x2={isVertical ? guide.positionMm : (extent?.endMm ?? wallLengthMm)}
+                  y2={
+                    isVertical
+                      ? extent
+                        ? wallLocalYToSvgY(wallHeightMm, extent.startMm)
+                        : wallHeightMm
+                      : guideSvgY
+                  }
+                  vectorEffect="non-scaling-stroke"
+                />
+                {isShelfGuide && extent && guideSvgY !== undefined && pixelsPerMm > 0 ? (
+                  // Names the relationship the line is stating, because a short
+                  // dashed line alone still has to be inferred. Sized in screen
+                  // px through the mm user space, like every other canvas label.
+                  <text
+                    className="snap-guide-label"
+                    fontSize={12 / pixelsPerMm}
+                    textAnchor="end"
+                    x={extent.endMm}
+                    y={guideSvgY - 6 / pixelsPerMm}
+                  >
+                    On shelf
+                  </text>
+                ) : null}
+              </g>
+            );
+          })}
         {isDimensionLinesEligible ? (
           <GroupDimensionLines
             members={effectiveDimensionMembers}

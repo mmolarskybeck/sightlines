@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getPlaceableFloorWalls, type FloorWall } from "../../../domain/geometry/planObjects";
-import type { Floor, Room } from "../../../domain/project";
+import type { Floor, Room, ShelfWallObject } from "../../../domain/project";
 import {
   DROP_TARGET_USER_DATA_KEY,
   dropGhostTransform,
@@ -454,5 +454,101 @@ describe("resolveThreeDrop with a grab offset", () => {
     });
     expect(result).toMatchObject({ anchor: "floor", xMm: 1500, yMm: 1050 });
     expect(result!.ghost).toMatchObject({ centerXMm: 1500, centerYMm: 1050 });
+  });
+});
+
+// A 1200-wide slab on wall-0, top face at 1000mm, centred at x=3000.
+const SHELF: ShelfWallObject = {
+  id: "shelf-1",
+  kind: "shelf",
+  wallId: "wall-0",
+  xMm: 3000,
+  yMm: 980,
+  widthMm: 1200,
+  heightMm: 40,
+  depthMm: 300
+};
+
+describe("resolveThreeDrop shelf seating", () => {
+  const walls = wallsFor(boxRoom("ccw"));
+
+  it("is off unless the caller asks for it", () => {
+    const result = resolveThreeDrop({
+      // Bottom edge would be at 1100 — 100mm above the slab's 1000 top face.
+      point: worldHit(3000, 1500, 0),
+      tag: { kind: "wall", wallId: "wall-0" },
+      walls,
+      dims,
+      wallObjects: [SHELF]
+    });
+    expect(result).toMatchObject({ anchor: "wall", yMm: 1500 });
+    expect(result!.anchor === "wall" && result!.shelfId).toBeUndefined();
+  });
+
+  it("stands the work on the slab and names the shelf", () => {
+    const result = resolveThreeDrop({
+      point: worldHit(3000, 1500, 0),
+      tag: { kind: "wall", wallId: "wall-0" },
+      walls,
+      dims,
+      wallObjects: [SHELF],
+      seatOnShelves: true
+    });
+    // Seated centre = top face (1000) + half the 800mm outer height.
+    expect(result).toMatchObject({ anchor: "wall", yMm: 1400, shelfId: "shelf-1" });
+    // The ghost rides the seated height, so the preview shows the commit.
+    expect(result!.ghost.centerHeightMm).toBeCloseTo(1400);
+  });
+
+  it("leaves a work out of capture range alone", () => {
+    const result = resolveThreeDrop({
+      // Bottom edge at 2000, a full metre above the slab.
+      point: worldHit(3000, 2400, 0),
+      tag: { kind: "wall", wallId: "wall-0" },
+      walls,
+      dims,
+      wallObjects: [SHELF],
+      seatOnShelves: true
+    });
+    expect(result).toMatchObject({ anchor: "wall", yMm: 2400 });
+    expect(result!.anchor === "wall" && result!.shelfId).toBeUndefined();
+  });
+
+  it("seats against the CLAMPED x, so a shelf the work is pushed off is not used", () => {
+    // Raw hit past the wall's end: the clamp puts the work's centre at 3700,
+    // spanning 3400..4000, which still overlaps the slab (2400..3600).
+    const seated = resolveThreeDrop({
+      point: worldHit(4500, 1500, 0),
+      tag: { kind: "wall", wallId: "wall-0" },
+      walls,
+      dims,
+      wallObjects: [SHELF],
+      seatOnShelves: true
+    });
+    expect(seated).toMatchObject({ xMm: 3700, shelfId: "shelf-1" });
+
+    // A narrower slab that the clamped span misses entirely is not offered.
+    const narrow: ShelfWallObject = { ...SHELF, xMm: 2000, widthMm: 400 };
+    const free = resolveThreeDrop({
+      point: worldHit(4500, 1500, 0),
+      tag: { kind: "wall", wallId: "wall-0" },
+      walls,
+      dims,
+      wallObjects: [narrow],
+      seatOnShelves: true
+    });
+    expect(free!.anchor === "wall" && free!.shelfId).toBeUndefined();
+  });
+
+  it("never seats on a shelf on another wall", () => {
+    const result = resolveThreeDrop({
+      point: worldHit(3000, 1500, 0),
+      tag: { kind: "wall", wallId: "wall-0" },
+      walls,
+      dims,
+      wallObjects: [{ ...SHELF, wallId: "wall-1" }],
+      seatOnShelves: true
+    });
+    expect(result!.anchor === "wall" && result!.shelfId).toBeUndefined();
   });
 });

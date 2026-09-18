@@ -188,3 +188,41 @@ describe("resolveSnap", () => {
     });
   });
 });
+
+describe("shelf-top tier", () => {
+  it("outranks the centerline at equal or greater distance, and a door's floor still outranks it", () => {
+    const shelfTop = {
+      id: "shelf-top:shelf-1",
+      kind: "shelf-top" as const,
+      axis: "y" as const,
+      point: { xMm: 0, yMm: 1400 }
+    };
+    const centerline = {
+      id: "centerline",
+      kind: "centerline" as const,
+      axis: "y" as const,
+      point: { xMm: 0, yMm: 1450 }
+    };
+
+    // Nearer to the centerline; the shelf still claims the axis.
+    const shelfWins = resolveSnap({ xMm: 0, yMm: 1445 }, [shelfTop, centerline], {
+      thresholdMm: 100
+    });
+    expect(shelfWins.snapTargetIds.y).toBe("shelf-top:shelf-1");
+    expect(shelfWins.point.yMm).toBe(1400);
+
+    // A door's floor target carries an explicit priority of 0 and still beats
+    // it — the one tier above a shelf top.
+    const doorFloor = {
+      id: "floor",
+      kind: "floor" as const,
+      axis: "y" as const,
+      priority: 0,
+      point: { xMm: 0, yMm: 1015 }
+    };
+    const floorWins = resolveSnap({ xMm: 0, yMm: 1390 }, [shelfTop, doorFloor], {
+      thresholdMm: 400
+    });
+    expect(floorWins.snapTargetIds.y).toBe("floor");
+  });
+});

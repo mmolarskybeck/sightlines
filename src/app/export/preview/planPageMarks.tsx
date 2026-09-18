@@ -4,6 +4,7 @@ import {
   casePlanGlyph,
   wallTextPlanGlyph
 } from "../../../domain/geometry/caseGlyphs";
+import { shelfPlanGlyph } from "../../../domain/geometry/shelfGlyphs";
 import { monitorPlanGlyph } from "../../../domain/geometry/monitorGlyphs";
 import type { DoorSwingPlanGlyph } from "../../../domain/geometry/doorGlyphs";
 import { getRoomPlaceableWalls } from "../../../domain/geometry/placeableWalls";
@@ -231,6 +232,28 @@ export function planObjectMarks(
         .join(" ");
       inner.push(<polygon key={`${key}-leg${i}`} points={pts} fill={SUBTLE} />);
     });
+  } else if (kind === "shelf") {
+    // A wall shelf, top-down: the protruding slab, FILLED — the outline IS the
+    // glyph (shelfGlyphs.ts). Same fill token and stroke weight the PDF writer
+    // uses, since this card is a look-ahead at that artifact.
+    const { outline } = shelfPlanGlyph({ widthMm: rect.widthMm, depthMm: rect.depthMm });
+    const pts = [
+      world(outline.x0Mm, outline.y0Mm),
+      world(outline.x1Mm, outline.y0Mm),
+      world(outline.x1Mm, outline.y1Mm),
+      world(outline.x0Mm, outline.y1Mm)
+    ]
+      .map((p) => `${p.x},${p.y}`)
+      .join(" ");
+    inner.push(
+      <polygon
+        key={`${key}-slab`}
+        points={pts}
+        fill={FILL_WEAK}
+        stroke={SUBTLE}
+        strokeWidth={0.5}
+      />
+    );
   } else if (kind === "wall-text") {
     const glyph = wallTextPlanGlyph({
       widthMm: rect.widthMm,

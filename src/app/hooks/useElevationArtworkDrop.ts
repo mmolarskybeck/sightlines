@@ -45,7 +45,13 @@ export function useElevationArtworkDrop(options: {
   artworksById: Map<string, Artwork> | undefined;
   draggingArtworkId: string | null;
   onPlaceArtwork:
-    | ((artworkId: string, wallId: string, xMm: number, yMm: number) => void)
+    | ((
+        artworkId: string,
+        wallId: string,
+        xMm: number,
+        yMm: number,
+        seatOnShelfId?: string
+      ) => void)
     | undefined;
   containerRef: RefObject<HTMLDivElement | null>;
   toWallLocalMm: (clientX: number, clientY: number) => Vector2 | null;
@@ -181,7 +187,16 @@ export function useElevationArtworkDrop(options: {
       new Set(dropGhost?.brokenBarrierIds)
     );
 
-    onPlaceArtwork?.(artworkId, wallId, snapResult.point.xMm, snapResult.point.yMm);
+    const seatedShelfId = snapResult.snapTargetIds.y?.startsWith("shelf-top:")
+      ? snapResult.snapTargetIds.y.slice("shelf-top:".length)
+      : undefined;
+    onPlaceArtwork?.(
+      artworkId,
+      wallId,
+      snapResult.point.xMm,
+      snapResult.point.yMm,
+      seatedShelfId
+    );
   }
 
   function handleDragOver(event: ReactDragEvent<HTMLDivElement>) {

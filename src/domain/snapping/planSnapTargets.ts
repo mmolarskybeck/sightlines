@@ -98,6 +98,12 @@ export function floatPolicyForKind(kind: WallObject["kind"]): FloatPolicy {
   // decides wall-case vs floor-case from the resolved anchor, so a case near a
   // wall becomes a wall case and one on open floor becomes a floor case.
   if (kind === "case") return "float";
+  // A shelf floats too, but for the opposite reason to the case: it is
+  // WALL-ONLY (there is no floor shelf), so a click far from every wall must
+  // resolve to a floor anchor the placement action can REFUSE with a hint,
+  // rather than "capture-any" silently flinging the shelf onto whichever wall
+  // happens to be nearest in the room. See placeOpeningFromPlan's shelf branch.
+  if (kind === "shelf") return "float";
   // door | window | wall-text: capture the nearest wall at any distance.
   return "capture-any";
 }

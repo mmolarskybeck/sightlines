@@ -4,7 +4,13 @@ import { PolygonIcon } from "@phosphor-icons/react/dist/csr/Polygon";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
 import { TextAlignLeftIcon } from "@phosphor-icons/react/dist/csr/TextAlignLeft";
 import type { InsertToolKind } from "../../../domain/placement/createOpening";
-import { CaseGlyph, PartitionGlyph, RectangleRoomGlyph, WindowGlyph } from "./toolbarGlyphs";
+import {
+  CaseGlyph,
+  PartitionGlyph,
+  RectangleRoomGlyph,
+  ShelfGlyph,
+  WindowGlyph
+} from "./toolbarGlyphs";
 
 // Shared descriptors for the insert tools, so the full segmented picker and
 // the compact menu/trigger agree on every icon, label, resting hint, and
@@ -27,7 +33,8 @@ export const OPENING_TOOL_ORDER: InsertToolKind[] = [
   "window",
   "blocked-zone",
   "wall-text",
-  "case"
+  "case",
+  "shelf"
 ];
 
 export const OPENING_TOOL_META: Record<InsertToolKind, InsertToolMeta> = {
@@ -70,6 +77,18 @@ export const OPENING_TOOL_META: Record<InsertToolKind, InsertToolMeta> = {
     armed: "Placing a display case",
     kbd: "C",
     icon: <CaseGlyph aria-hidden="true" size={16} />
+  },
+  shelf: {
+    key: "shelf",
+    label: "Shelf",
+    hint: "Insert a shelf",
+    // "Click a wall", not "Click to place": a shelf is wall-only, so a click on
+    // open floor places nothing, and the armed tooltip is where that is cheapest
+    // to learn.
+    armed: "Click a wall to place a shelf",
+    // L, because S is the snap-to-grid toggle (see useToolbarShortcuts).
+    kbd: "L",
+    icon: <ShelfGlyph aria-hidden="true" size={16} />
   }
 };
 

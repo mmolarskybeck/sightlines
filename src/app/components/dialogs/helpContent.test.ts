@@ -144,6 +144,24 @@ describe("viewHelpGroups", () => {
     expect(keyLabels(groups)).toEqual(expect.arrayContaining(["←", "↑", "↓", "→", "⌥"]));
   });
 
+  it("teaches the shelf gesture and the way out of every snap in elevation", () => {
+    const hints = viewHelpGroups("elevation", "keyboard", true).flatMap((group) => group.hints);
+    expect(hints.find((hint) => hint.action === "Stand a work on a shelf")?.inputs).toEqual([
+      [{ kind: "text", label: "drag it over the shelf" }]
+    ]);
+    expect(hints.find((hint) => hint.action === "Move freely, ignoring snaps")?.inputs).toEqual([
+      [
+        { kind: "key", label: "⌘" },
+        { kind: "text", label: "drag an object" }
+      ]
+    ]);
+    // Windows/Linux spell the bypass modifier as Ctrl.
+    const pcBypass = viewHelpGroups("elevation", "keyboard", false)
+      .flatMap((group) => group.hints)
+      .find((hint) => hint.action === "Move freely, ignoring snaps");
+    expect(pcBypass?.inputs[0]?.[0]).toEqual({ kind: "key", label: "Ctrl" });
+  });
+
   it("keeps the elevation nudge family together on keyboard", () => {
     const actions = viewHelpGroups("elevation", "keyboard", true)
       .flatMap((group) => group.hints)

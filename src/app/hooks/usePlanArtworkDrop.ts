@@ -24,6 +24,7 @@ import {
   type Project,
   type WallObjectBase
 } from "../../domain/project";
+import { seatOnAnyOverlappingShelf } from "../../domain/placement/shelfSeating";
 import { floatPolicyForKind, resolvePlanPlacement } from "../../domain/snapping/planSnapTargets";
 import type { SnapTargetIds } from "../../domain/snapping/resolveSnap";
 import {
@@ -56,7 +57,15 @@ export function usePlanArtworkDrop(options: {
   gridSnapTargets: Parameters<typeof resolvePlanPlacement>[1]["gridTargets"];
   snapToGrid: boolean;
   snapThresholdMm: number;
-  onPlaceArtwork: ((artworkId: string, wallId: string, xMm: number, yMm: number) => void) | undefined;
+  onPlaceArtwork:
+    | ((
+        artworkId: string,
+        wallId: string,
+        xMm: number,
+        yMm: number,
+        seatOnShelfId?: string
+      ) => void)
+    | undefined;
   onPlaceArtworkOnFloor: ((artworkId: string, xMm: number, yMm: number) => void) | undefined;
 }) {
   const {
@@ -103,6 +112,7 @@ export function usePlanArtworkDrop(options: {
     heightMm: number;
     depthMm: number;
     wallFootprintWidthMm?: number;
+    wallFootprintHeightMm?: number;
     wallFootprintDepthMm?: number;
   } {
     const artwork = artworkId ? artworksById?.get(artworkId) : undefined;
@@ -120,16 +130,20 @@ export function usePlanArtworkDrop(options: {
       // frameless display type (projection / sculpture) both add no band, so
       // the drop ghost is the width the placement will actually occupy.
       const framing = effectiveFraming(artwork);
-      const wallFootprintWidthMm = getArtworkOuterDimensionsMm(
+      const outer = getArtworkOuterDimensionsMm(
         widthMm,
         heightMm,
         framing.matWidthMm,
         framing.frame
-      ).widthMm;
+      );
       return {
         widthMm,
         heightMm,
-        wallFootprintWidthMm,
+        wallFootprintWidthMm: outer.widthMm,
+        // The outer HEIGHT never reaches the plan geometry (plan has no vertical
+        // axis) — it exists for shelf seating, which stands the framed outer
+        // bottom on the slab exactly as elevation and the rider test do.
+        wallFootprintHeightMm: outer.heightMm,
         // A checklist drag has no placement yet, so no displayDimensionsOverride
         // — the record's own depth is the only source. Undefined for flat works,
         // which keeps the drop ghost at the nominal band; a depth-bearing work
@@ -188,6 +202,34 @@ export function usePlanArtworkDrop(options: {
     });
   }
 
+  // Would this wall drop stand the work on a shelf? Plan has NO vertical axis,
+  // so there is no "near enough" to ask about the way elevation's shelf-top
+  // snap does: a work released over a shelf's plan footprint is a work the
+  // curator put on that shelf, and the hang height comes from the slab instead
+  // of the centerline (seatOnAnyOverlappingShelf).
+  //
+  // ⌘/Ctrl skips it, the same precision bypass that already kills the grid tier
+  // and the neighbor threshold above: held, the drop is a free hang.
+  function shelfSeatingForDrop(
+    placement: ReturnType<typeof resolveArtworkDrop>["placement"],
+    dims: ReturnType<typeof effectiveArtworkDims>,
+    bypassSnap: boolean
+  ): { yMm: number; shelfId: string } | null {
+    if (bypassSnap || placement.anchor !== "wall") return null;
+    return seatOnAnyOverlappingShelf(
+      {
+        wallId: placement.wallId,
+        xMm: placement.xMm,
+        // The FRAMED outer box: the frame is what rests on the slab, and it is
+        // the box getShelfRiders measures, so a drop that looks seated is a
+        // drop the shelf then carries.
+        widthMm: dims.wallFootprintWidthMm ?? dims.widthMm,
+        heightMm: dims.wallFootprintHeightMm ?? dims.heightMm
+      },
+      project.wallObjects
+    );
+  }
+
   // Shared by the HTML5 dragover handler and the touch-drag subscription: given
   // client coordinates and the artwork being dragged, resolve the placement and
   // paint the drop ghost. Assumes the caller has already gated on an active
@@ -201,12 +243,16 @@ export function usePlanArtworkDrop(options: {
     const pointerMm = toSvgMm(clientX, clientY);
     if (!pointerMm) return;
 
-    const result = resolveArtworkDrop(pointerMm, effectiveArtworkDims(artworkId), bypassSnap);
+    const dims = effectiveArtworkDims(artworkId);
+    const result = resolveArtworkDrop(pointerMm, dims, bypassSnap);
     dropSnapTargetIdsRef.current = result.snapTargetIds;
     setDropGhost({
       planRect: result.planRect,
       placement: result.placement,
-      activeGuides: result.activeGuides
+      activeGuides: result.activeGuides,
+      // The slab this drop would seat the work on, so the plan glyph can light
+      // up under the cursor — resolved exactly as the commit below resolves it.
+      shelfId: shelfSeatingForDrop(result.placement, dims, bypassSnap)?.shelfId
     });
   }
 
@@ -226,8 +272,8 @@ export function usePlanArtworkDrop(options: {
     const pointerMm = toSvgMm(clientX, clientY);
     if (!pointerMm) return;
 
-    const placement = resolveArtworkDrop(pointerMm, effectiveArtworkDims(artworkId), bypassSnap)
-      .placement;
+    const dims = effectiveArtworkDims(artworkId);
+    const placement = resolveArtworkDrop(pointerMm, dims, bypassSnap).placement;
     // Where it was dropped decides what it becomes, for any work: no wall in
     // capture range → it stands on the floor via placeArtworkOnFloor, whatever
     // the library form said. The form flag is deliberately NOT written here —
@@ -243,10 +289,17 @@ export function usePlanArtworkDrop(options: {
     // an assumption.
     if (placement.anchor !== "wall") return;
     const wall = floorWallsForTool.find((candidate) => candidate.id === placement.wallId);
-    // A wall-dropped artwork hangs at the wall's centerline (its own default,
-    // or the project default) — plan view chooses no y itself.
-    const yMm = wall?.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
-    onPlaceArtwork?.(artworkId, placement.wallId, placement.xMm, yMm);
+    // A shelf under the drop wins over the centerline: dropping a work onto a
+    // slab's footprint in plan is the same gesture as dragging it onto the slab
+    // in elevation, and it must produce the same seated placement (bottom edge
+    // ON the top face) — otherwise the work would land at eye level and the
+    // shelf would be the only surface that could not be aimed at from plan.
+    // Otherwise a wall-dropped artwork hangs at the wall's centerline (its own
+    // default, or the project default) — plan view chooses no y itself.
+    const shelfSeating = shelfSeatingForDrop(placement, dims, bypassSnap);
+    const yMm =
+      shelfSeating?.yMm ?? wall?.defaultCenterlineHeightMm ?? project.defaultCenterlineHeightMm;
+    onPlaceArtwork?.(artworkId, placement.wallId, placement.xMm, yMm, shelfSeating?.shelfId);
   }
 
   function handleArtworkDragOver(event: ReactDragEvent<HTMLDivElement>) {

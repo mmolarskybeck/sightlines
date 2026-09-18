@@ -232,7 +232,7 @@ export function withArtworkFootprint<T extends WallObject>(
 // callers hold it as optional) behaves like a missing entry: identity.
 export function withArtworkFootprintFromMap<T extends WallObject>(
   object: T,
-  artworksById: Map<string, Artwork> | undefined
+  artworksById: ReadonlyMap<string, Artwork> | undefined
 ): T {
   return withArtworkFootprint(
     object,

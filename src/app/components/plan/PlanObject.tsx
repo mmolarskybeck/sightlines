@@ -9,6 +9,7 @@ import {
   CASE_WALL_THICKNESS_MM
 } from "../../../domain/project";
 import { casePlanGlyph, wallTextPlanGlyph } from "../../../domain/geometry/caseGlyphs";
+import { shelfPlanGlyph } from "../../../domain/geometry/shelfGlyphs";
 import { monitorPlanGlyph, MONITOR_BEZEL_MM } from "../../../domain/geometry/monitorGlyphs";
 import type { DoorSwingPlanGlyph } from "../../../domain/geometry/doorGlyphs";
 import { clampMm } from "../shared/glyphScale";
@@ -26,6 +27,7 @@ export function PlanObject({
   isInvalid = false,
   isMonitor = false,
   isSelected = false,
+  isSnapTarget = false,
   kind,
   onBeginDrag,
   onSelect,
@@ -62,7 +64,14 @@ export function PlanObject({
   // the app for a drawing difference. Ignored for every kind but "artwork".
   isMonitor?: boolean;
   isSelected?: boolean;
-  kind: "door" | "window" | "blocked-zone" | "artwork" | "wall-text" | "case";
+  // A gesture in flight would seat its object ON this one (today: a checklist
+  // work captured over a shelf's footprint during a plan drop). A SURFACE
+  // ANNOUNCES ITSELF — the slab lights up in the same petrol wash the
+  // elevation's shelf-top guide uses, so "it will land on the shelf" is
+  // visible in plan too. Independent of selection: the shelf need not be
+  // selected, and a selected shelf still shows the capture.
+  isSnapTarget?: boolean;
+  kind: "door" | "window" | "blocked-zone" | "artwork" | "wall-text" | "case" | "shelf";
   // Starts a pointer-drag move of this object (PlanView owns the live preview
   // + commit-on-release). A click without real movement still falls through to
   // onSelect — the drag release is a no-op below its movement threshold.
@@ -107,6 +116,7 @@ export function PlanObject({
   if (isSelected) classNames.push("is-selected");
   if (isGhost) classNames.push("is-ghost");
   if (isInvalid) classNames.push("is-invalid");
+  if (isSnapTarget) classNames.push("is-snap-target");
 
   const x = planRect.centerXMm - planRect.widthMm / 2;
   const y = planRect.centerYMm - planRect.depthMm / 2;
@@ -460,6 +470,33 @@ export function PlanObject({
                   />
                 ))}
               </>
+            );
+          })()}
+        </g>
+      ) : null}
+      {kind === "shelf" ? (
+        // A wall shelf, top-down: the protruding slab, filled. A shelf has no
+        // inner construction to draw (shelfGlyphs.ts: "the outline IS the
+        // glyph"), so what distinguishes it from the hollow rects around it is
+        // that it is SOLID — opaque timber seen from above, which is also what
+        // makes a work standing on it read as standing on something. The rect
+        // comes from the shared glyph module in its local-centered frame, so
+        // the canvas and the PDF export draw the same slab.
+        <g className="plan-object-mark plan-object-mark--shelf">
+          {(() => {
+            const { outline } = shelfPlanGlyph({
+              widthMm: planRect.widthMm,
+              depthMm: planRect.depthMm
+            });
+            return (
+              <rect
+                className="plan-object-shelf"
+                height={outline.y1Mm - outline.y0Mm}
+                vectorEffect="non-scaling-stroke"
+                width={outline.x1Mm - outline.x0Mm}
+                x={midX + outline.x0Mm}
+                y={midY + outline.y0Mm}
+              />
             );
           })()}
         </g>

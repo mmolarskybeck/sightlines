@@ -16,6 +16,7 @@ import type {
 } from "../../../domain/geometry/scene3d";
 import { ArtworkPlane } from "./ArtworkPlane";
 import { WallCaseMesh } from "./CaseMesh";
+import { WallShelfMesh } from "./WallShelfMesh";
 import { WallTextPanel } from "./WallTextPanel";
 import { mmToWorld, MM_TO_WORLD } from "./coordinates";
 import { DROP_TARGET_USER_DATA_KEY } from "./dropTarget";
@@ -108,6 +109,7 @@ export function WallPanel({
   artworksById,
   isSelected,
   selectedObjectIds,
+  shelfSnapTargetId,
   selectedArtworkId,
   onSelectWall,
   onSelectObject,
@@ -121,6 +123,10 @@ export function WallPanel({
   artworksById: ReadonlyMap<string, Artwork>;
   isSelected: boolean;
   selectedObjectIds: string[];
+  // The shelf a live drop/drag would stand its work ON. Read only by the shelf
+  // pass below, which outlines that slab exactly as a selected one — the 3D
+  // half of "a surface announces itself" (see WallShelfMesh.isSnapTarget).
+  shelfSnapTargetId?: string | null;
   selectedArtworkId: string | null;
   onSelectWall: (wallId: string) => void;
   onSelectObject: (objectId: string, opts: { additive: boolean }) => void;
@@ -299,6 +305,19 @@ export function WallPanel({
           key={wallCase.objectId}
           wallCase={wallCase}
           isSelected={selectedObjectIds.includes(wallCase.objectId)}
+          onSelect={onSelectObject}
+          ghosted={ghosted}
+        />
+      ))}
+      {/* Shelves paint with the cases: both are furniture cantilevered off the
+          wall, and the works standing on a shelf are drawn by the artwork pass
+          below. */}
+      {wall.shelves.map((shelf) => (
+        <WallShelfMesh
+          key={shelf.objectId}
+          shelf={shelf}
+          isSelected={selectedObjectIds.includes(shelf.objectId)}
+          isSnapTarget={shelf.objectId === shelfSnapTargetId}
           onSelect={onSelectObject}
           ghosted={ghosted}
         />

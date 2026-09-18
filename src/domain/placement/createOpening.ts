@@ -1,17 +1,28 @@
-import type { OpeningWallObject, WallObjectBase, WallTextWallObject } from "../project";
+import type {
+  OpeningWallObject,
+  ShelfWallObject,
+  WallObjectBase,
+  WallTextWallObject
+} from "../project";
 import { newId } from "../id";
 
 export type OpeningKind = OpeningWallObject["kind"];
 
 // Everything the Insert cluster can arm: openings plus wall text plus the
-// display case. Artworks are placed from the checklist, not the Insert cluster,
-// so they are excluded. The armed-tool plumbing (PlanMode, toolbar shortcuts,
-// ghost previews) is keyed on this widened kind; only the object-CREATION step
-// branches wall-text and case away from the opening builders (openings
-// pair/mirror and block placement; wall text and cases do neither). Unlike the
-// other insert tools, one armed "case" decides wall-case vs floor-case at
-// commit from where the click lands (see placeCaseFromPlan).
-export type InsertToolKind = OpeningKind | WallTextWallObject["kind"] | "case";
+// display case plus the shelf. Artworks are placed from the checklist, not the
+// Insert cluster, so they are excluded. The armed-tool plumbing (PlanMode,
+// toolbar shortcuts, ghost previews) is keyed on this widened kind; only the
+// object-CREATION step branches wall-text, case and shelf away from the opening
+// builders (openings pair/mirror and block placement; wall text, cases and
+// shelves do none of that). Unlike the other insert tools, one armed "case"
+// decides wall-case vs floor-case at commit from where the click lands (see
+// placeCaseFromPlan); a shelf is wall-only, so a click that resolves to open
+// floor places nothing.
+export type InsertToolKind =
+  | OpeningKind
+  | WallTextWallObject["kind"]
+  | "case"
+  | ShelfWallObject["kind"];
 
 // Curatorial defaults, not architectural code minimums — close enough for a
 // first placement that a curator will immediately adjust numerically anyway

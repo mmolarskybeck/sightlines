@@ -150,25 +150,27 @@ export type PlanScenePaintEntry<W, F> =
   | { group: "wall"; entry: W }
   | { group: "floor"; entry: F };
 
-// Paint order for plan-scene objects: cases first, then everything else,
-// across BOTH the wall and floor groups. An artwork hangs above a case's
-// glass top, so seen from above the artwork rect must cover the case wherever
-// their footprints overlap — never the reverse, and (both fills being opaque)
-// never "through" either one. The partition crosses the two groups because a
-// wall artwork can sit over a wall case or over a floor case pushed flush to
-// the wall. Every surface that paints a plan scene (SVG canvas, PDF export)
-// must consume this one ordering so overlap resolution can never drift
-// between screen and print. Order within each phase is stable.
+// Paint order for plan-scene objects: cases and shelves first, then everything
+// else, across BOTH the wall and floor groups. An artwork hangs above a case's
+// glass top — and STANDS ON a shelf — so seen from above the artwork rect must
+// cover the case or shelf wherever their footprints overlap; never the
+// reverse, and (both fills being opaque) never "through" either one. The
+// partition crosses the two groups because a wall artwork can sit over a wall
+// case or over a floor case pushed flush to the wall. Every surface that
+// paints a plan scene (SVG canvas, PDF export) must consume this one ordering
+// so overlap resolution can never drift between screen and print. Order within
+// each phase is stable.
 export function planScenePaintOrder<
   W extends { object: { kind: string } },
   F extends { object: { kind: string } }
 >(wallObjects: readonly W[], floorObjects: readonly F[]): PlanScenePaintEntry<W, F>[] {
-  const isCase = (entry: { object: { kind: string } }) => entry.object.kind === "case";
+  const isUnderlay = (entry: { object: { kind: string } }) =>
+    entry.object.kind === "case" || entry.object.kind === "shelf";
   return [
-    ...wallObjects.filter(isCase).map((entry): PlanScenePaintEntry<W, F> => ({ group: "wall", entry })),
-    ...floorObjects.filter(isCase).map((entry): PlanScenePaintEntry<W, F> => ({ group: "floor", entry })),
-    ...wallObjects.filter((entry) => !isCase(entry)).map((entry): PlanScenePaintEntry<W, F> => ({ group: "wall", entry })),
-    ...floorObjects.filter((entry) => !isCase(entry)).map((entry): PlanScenePaintEntry<W, F> => ({ group: "floor", entry }))
+    ...wallObjects.filter(isUnderlay).map((entry): PlanScenePaintEntry<W, F> => ({ group: "wall", entry })),
+    ...floorObjects.filter(isUnderlay).map((entry): PlanScenePaintEntry<W, F> => ({ group: "floor", entry })),
+    ...wallObjects.filter((entry) => !isUnderlay(entry)).map((entry): PlanScenePaintEntry<W, F> => ({ group: "wall", entry })),
+    ...floorObjects.filter((entry) => !isUnderlay(entry)).map((entry): PlanScenePaintEntry<W, F> => ({ group: "floor", entry }))
   ];
 }
 
@@ -253,7 +255,7 @@ export function getRenderedWallObjectPlanRect(
         ).widthMm
       : planRect.widthMm;
 
-  const offsetToViewerSide = kind === "artwork" || kind === "case";
+  const offsetToViewerSide = kind === "artwork" || kind === "case" || kind === "shelf";
   return {
     ...(offsetToViewerSide
       ? offsetPlanRectToViewerSide({ ...planRect, widthMm: framedWidthMm })

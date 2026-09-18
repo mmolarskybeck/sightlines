@@ -15,6 +15,7 @@ function renderInspector(
     onRestoreWall?: () => void;
     onSetNorthWall?: () => void;
     onCommitHeight?: (heightMm: number) => Promise<void>;
+    onAddShelf?: () => void;
   } = {}
 ) {
   const onCommitLength = vi.fn().mockResolvedValue(undefined);
@@ -29,6 +30,7 @@ function renderInspector(
         lastGeometryEdit={null}
         onAddCase={vi.fn()}
         onAddOpening={vi.fn()}
+        onAddShelf={overrides.onAddShelf ?? vi.fn()}
         onCommitHeight={overrides.onCommitHeight ?? vi.fn()}
         onCommitLength={onCommitLength}
         onOpenWall={overrides.onOpenWall ?? vi.fn()}
@@ -60,6 +62,16 @@ describe("WallInspector open/closed states", () => {
     expect(onOpenWall).toHaveBeenCalledTimes(1);
   });
 
+  // The shelf chip sits in the same "Add to this wall" category as the case,
+  // so a shelf can be created without arming the Insert tool.
+  it("fires onAddShelf from the Shelf chip", () => {
+    const onAddShelf = vi.fn();
+    renderInspector(false, { onAddShelf });
+
+    fireEvent.click(screen.getByRole("button", { name: "Shelf" }));
+    expect(onAddShelf).toHaveBeenCalledTimes(1);
+  });
+
   it("swaps to Restore on an open wall and HIDES the whole add category", () => {
     const onRestoreWall = vi.fn();
     renderInspector(false, { isOpenSide: true, onRestoreWall });
@@ -68,6 +80,7 @@ describe("WallInspector open/closed states", () => {
     // Hidden, not disabled — the entire category is unavailable.
     expect(screen.queryByRole("button", { name: "Door" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Wall case" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Shelf" })).not.toBeInTheDocument();
     // A hanging-height readout is meaningless without a surface.
     expect(screen.queryByText("Centerline")).not.toBeInTheDocument();
 
@@ -198,6 +211,7 @@ function renderNamed(wallName: string) {
         lastGeometryEdit={null}
         onAddCase={vi.fn()}
         onAddOpening={vi.fn()}
+        onAddShelf={vi.fn()}
         onCommitHeight={vi.fn()}
         onCommitLength={vi.fn().mockResolvedValue(undefined)}
         onOpenWall={vi.fn()}

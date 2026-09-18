@@ -78,6 +78,13 @@ export function useToolbarShortcuts({
           if (viewMode !== "plan") return;
           armOpening("case");
           break;
+        case "l":
+          // L, not S: S is the snap-to-grid toggle, and the shelf is the fifth
+          // insert tool to want its own initial. Unlike the case, a shelf is
+          // wall-only and so is offered on BOTH surfaces — plan clicks a wall,
+          // elevation clicks the wall it is already showing.
+          armOpening("shelf");
+          break;
         case "p":
           if (viewMode !== "plan") return;
           event.preventDefault();

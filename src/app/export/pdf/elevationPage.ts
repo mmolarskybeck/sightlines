@@ -289,6 +289,33 @@ export function drawElevationCase(
   }
 }
 
+// A wall shelf in elevation: one solid slab band — the export twin of
+// ElevationShelf.tsx. The scene entry carries the band's SPAN (xMinMm..xMaxMm
+// at the slab's centre height), which is exactly what a rect needs, so nothing
+// is re-derived here: the span already came from shelfElevationGlyph.
+export function drawElevationShelf(
+  page: PDFPage,
+  transform: ElevationTransform,
+  shelf: ElevationScene["shelves"][number]
+) {
+  const rect = elevationRect(
+    transform,
+    shelf.xMinMm,
+    shelf.yMm - shelf.heightMm / 2,
+    shelf.xMaxMm - shelf.xMinMm,
+    shelf.heightMm
+  );
+  // Filled, not outlined: a shelf is a surface a work stands on, and the fill
+  // is what makes it read that way rather than as another empty rectangle. The
+  // same fill token the canvas and the preview card use.
+  page.drawRectangle({
+    ...rect,
+    color: COLORS.surfaceStrong,
+    borderColor: COLORS.muted,
+    borderWidth: 0.7
+  });
+}
+
 // The elevation shadow of a freestanding floor case standing in front of the
 // wall: a light dashed outline from the floor line up to the case height,
 // spanning the along-wall range its footprint projects onto. Non-structural —

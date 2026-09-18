@@ -192,6 +192,103 @@ describe("Elevation dimension lines and marquee include cases and wall text", ()
   });
 });
 
+// A shelf joins the same pool for the same reason a case does: it is drawn on
+// the wall, it snaps, it selects, and it drags. The scene entry carries only an
+// objectId and a span, so the record has to be recovered in ElevationView —
+// getting that wrong would leave a slab on screen that nothing can pick up.
+describe("Elevation wall shelves", () => {
+  function shelfAt(wallId: string, xMm: number): WallObject {
+    return {
+      id: "shelf-1",
+      kind: "shelf",
+      wallId,
+      xMm,
+      // Slab centre 1180 with a 40mm thickness → top face at 1200.
+      yMm: 1180,
+      widthMm: 1200,
+      heightMm: 40,
+      depthMm: 300
+    };
+  }
+
+  function renderWithShelf(
+    wall: { id: string; heightMm: number; lengthMm: number; name: string },
+    props: { selectedObjectIds?: string[]; onMarqueeSelect?: (ids: string[]) => void } = {}
+  ) {
+    return render(
+      <TooltipProvider>
+        <ElevationView
+          centerlineMm={inchesCenterline()}
+          gridPrecisionFloorMm={null}
+          gridVisible={false}
+          onMarqueeSelect={props.onMarqueeSelect}
+          selectedObjectIds={props.selectedObjectIds ?? []}
+          snapToGrid={false}
+          unit="ft"
+          wallHeightMm={wall.heightMm}
+          wallId={wall.id}
+          wallLengthMm={wall.lengthMm}
+          wallName={wall.name}
+          viewport={FIT_VIEWPORT}
+          onViewportChange={() => {}}
+        />
+      </TooltipProvider>
+    );
+  }
+
+  it("draws the slab band and marks it selected", () => {
+    const { wall } = setupWall([]);
+    const shelf = shelfAt(wall.id, wall.lengthMm / 2);
+    useAppStore.setState((state) => ({
+      project: { ...state.project!, wallObjects: [shelf] }
+    }));
+
+    const { container } = renderWithShelf(wall, { selectedObjectIds: [shelf.id] });
+
+    const slab = container.querySelector(".elevation-shelf");
+    expect(slab).toBeTruthy();
+    expect(slab!.classList.contains("selected")).toBe(true);
+  });
+
+  it("picks up a shelf in a marquee rubber-band selection", () => {
+    const { wall } = setupWall([]);
+    const shelf = shelfAt(wall.id, 1000);
+    useAppStore.setState((state) => ({
+      project: { ...state.project!, wallObjects: [shelf] }
+    }));
+
+    const onMarqueeSelect = vi.fn();
+    const { container } = renderWithShelf(wall, { onMarqueeSelect });
+
+    const svg = container.querySelector("svg.elevation-svg")!;
+    // The slab spans xMm [400, 1600] at yMm [1160, 1200]; toWallLocalMm maps
+    // clientY to wallHeightMm - yMm, so a lower clientY is a HIGHER point.
+    fireEvent.pointerDown(svg, {
+      pointerId: 1,
+      pointerType: "mouse",
+      button: 0,
+      clientX: 0,
+      clientY: wall.heightMm - 1400
+    });
+    fireEvent.pointerMove(window, {
+      pointerId: 1,
+      pointerType: "mouse",
+      clientX: 2000,
+      clientY: wall.heightMm - 1000
+    });
+    fireEvent.pointerUp(window, {
+      pointerId: 1,
+      pointerType: "mouse",
+      clientX: 2000,
+      clientY: wall.heightMm - 1000
+    });
+
+    expect(onMarqueeSelect).toHaveBeenCalled();
+    const [ids] = onMarqueeSelect.mock.calls[0];
+    expect(ids).toContain(shelf.id);
+  });
+});
+
 function inchesCenterline() {
   return createSampleProject().defaultCenterlineHeightMm;
 }

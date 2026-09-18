@@ -16,11 +16,13 @@ import {
   getOpeningLegalSpan,
   type OpeningFit
 } from "../../domain/placement/fitOpeningOnWall";
+import { createShelf } from "../../domain/placement/createShelf";
 import { withDoorLeaf } from "../../domain/placement/sharedOpeningAnalysis";
 import {
   type BlockedZoneFloorObject,
   type ConnectableOpeningWallObject,
   DEFAULT_FLOOR_OBJECT_DEPTH_MM,
+  DEFAULT_SHELF_THICKNESS_MM,
   type DoorLeaf,
   type Project,
   type WallObject
@@ -197,6 +199,22 @@ export function createOpeningPlacementSlice(
       // here also narrows `kind` to OpeningKind for the opening builders below.
       if (kind === "case") {
         throw new Error("Display cases are placed via placeCaseFromPlan or addCaseToWall.");
+      }
+
+      // A shelf is wall-only and — like wall text — never pairs, mirrors or
+      // blocks, so it lands at the wall's midpoint at the default top height
+      // and skips the opening free-slot search entirely.
+      if (kind === "shelf") {
+        const shelf = createShelf({ wallId, xMm: wall.lengthMm / 2 });
+        const nextWallObjects = [...project.wallObjects, shelf];
+        await commitWallObjectEdit("Add shelf", project, nextWallObjects, [shelf.id], true, {
+          extras: selectionWrite(
+            { ...project, wallObjects: nextWallObjects },
+            { kind: "objects", ids: [shelf.id] },
+            get().wallContextId
+          )
+        });
+        return;
       }
 
       // Doors/windows can't be placed on a partition face in v1 (spec §2/§6.1);
@@ -534,6 +552,31 @@ export function createOpeningPlacementSlice(
         throw new Error("Display cases are placed via placeCaseFromPlan, not placeOpeningFromPlan.");
       }
 
+      // A shelf is cantilevered off a wall, so it is WALL-ONLY. Unlike the
+      // display case — one armed tool that decides wall vs floor from where the
+      // click lands — a shelf has no floor form to fall back to, and its float
+      // policy ("float", planSnapTargets) means a click clear of every wall
+      // really does resolve to a floor anchor. That click places nothing and
+      // says why, the same shape as the other refusals here: a click that
+      // silently does nothing reads as a broken app.
+      if (kind === "shelf") {
+        if (placement.anchor === "floor") {
+          set({ error: "A shelf hangs on a wall. Click a wall to place it." });
+          return;
+        }
+        if (refuseOpenWall(project, placement.wallId)) return;
+        const shelf = createShelf({ wallId: placement.wallId, xMm: placement.xMm });
+        const nextWallObjects = [...project.wallObjects, shelf];
+        await commitWallObjectEdit("Add shelf", project, nextWallObjects, [shelf.id], true, {
+          extras: selectionWrite(
+            { ...project, wallObjects: nextWallObjects },
+            { kind: "objects", ids: [shelf.id] },
+            get().wallContextId
+          )
+        });
+        return;
+      }
+
       if (placement.anchor === "floor") {
         // Only blocked zones can float. Doors and windows are excluded from
         // floor placement by the domain (FloorObject has no door/window
@@ -659,6 +702,28 @@ export function createOpeningPlacementSlice(
       // guarding here narrows `kind` to OpeningKind for the builders below.
       if (kind === "case") {
         throw new Error("Display cases cannot be placed from elevation.");
+      }
+
+      // A shelf IS placeable from elevation (it is the surface the works on it
+      // are hung against, so the wall's own view is where a curator puts one).
+      // The pointer's y is the slab's CENTRE, like every other object placed
+      // from this canvas and like the armed ghost drawn at the pointer — the
+      // TOP the inspector then edits is half a thickness above it.
+      if (kind === "shelf") {
+        const shelf = createShelf({
+          wallId,
+          xMm,
+          topMm: yMm + DEFAULT_SHELF_THICKNESS_MM / 2
+        });
+        const nextWallObjects = [...project.wallObjects, shelf];
+        await commitWallObjectEdit("Add shelf", project, nextWallObjects, [shelf.id], true, {
+          extras: selectionWrite(
+            { ...project, wallObjects: nextWallObjects },
+            { kind: "objects", ids: [shelf.id] },
+            get().wallContextId
+          )
+        });
+        return;
       }
 
       // Doors and windows remain disallowed on partition faces in elevation,

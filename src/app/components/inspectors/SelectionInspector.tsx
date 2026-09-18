@@ -58,6 +58,8 @@ function nearestNounFor(kind: ArrangeBoundaryKind): string {
       return "wall text";
     case "case":
       return "display case";
+    case "shelf":
+      return "shelf";
   }
 }
 

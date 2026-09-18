@@ -3,6 +3,10 @@ import {
   DEFAULT_FLOOR_CASE_HEIGHT_MM,
   DEFAULT_FLOOR_CASE_WIDTH_MM
 } from "../geometry/caseGlyphs";
+import {
+  DEFAULT_SHELF_THICKNESS_MM,
+  DEFAULT_SHELF_WIDTH_MM
+} from "../geometry/shelfGlyphs";
 import { newId } from "../id";
 import {
   getDefaultOpeningSizeMm,
@@ -34,6 +38,14 @@ export function getDefaultInsertToolSizeMm(kind: InsertToolKind): {
   // footprint only when the pointer captures a wall (see PlanView).
   if (kind === "case") {
     return { widthMm: DEFAULT_FLOOR_CASE_WIDTH_MM, heightMm: DEFAULT_FLOOR_CASE_HEIGHT_MM };
+  }
+  // A shelf's ghost is its slab seen head-on: default width by default
+  // THICKNESS (heightMm is the slab's thickness for a shelf). Without this the
+  // cast below would hand "shelf" to getDefaultOpeningSizeMm, whose switch
+  // returns undefined for it — compiler-silent, and an armed shelf ghost
+  // crashes the moment it reads widthMm.
+  if (kind === "shelf") {
+    return { widthMm: DEFAULT_SHELF_WIDTH_MM, heightMm: DEFAULT_SHELF_THICKNESS_MM };
   }
   return getDefaultOpeningSizeMm(kind as OpeningKind);
 }

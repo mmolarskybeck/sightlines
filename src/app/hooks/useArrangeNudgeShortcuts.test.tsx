@@ -50,7 +50,8 @@ function renderNudgeHarness({
   beginArrangeSession = vi.fn(),
   setArrangeSessionPreview = vi.fn(),
   viewMode = "elevation",
-  moveOpening = vi.fn(async () => {})
+  moveOpening = vi.fn(async () => {}),
+  moveWallObjectsGroup = vi.fn(async () => {})
 }: {
   project?: Project;
   artworks?: Artwork[];
@@ -72,6 +73,10 @@ function renderNudgeHarness({
     wallObjectId: string,
     xMm: number,
     yMm: number,
+    allowOverlap?: boolean
+  ) => Promise<void>;
+  moveWallObjectsGroup?: (
+    moves: { id: string; xMm: number; yMm: number }[],
     allowOverlap?: boolean
   ) => Promise<void>;
 } = {}) {
@@ -97,7 +102,8 @@ function renderNudgeHarness({
       setArrangeSessionPreview,
       commitArrangeSession,
       moveArtworkPlacement,
-      moveOpening
+      moveOpening,
+      moveWallObjectsGroup
     });
 
     return (
@@ -131,6 +137,7 @@ function renderNudgeHarness({
   return {
     moveArtworkPlacement,
     moveOpening,
+    moveWallObjectsGroup,
     commitArrangeSession,
     beginArrangeSession,
     setArrangeSessionPreview,
@@ -519,5 +526,113 @@ describe("useArrangeNudgeShortcuts in the 3D view", () => {
     );
     expect(event.defaultPrevented).toBe(true);
     expect(cameraTravelKeyDown).not.toHaveBeenCalled();
+  });
+});
+
+// A shelf and the works standing on it are one rigid assembly on EVERY move
+// path (chunk 3's rider rule). The keyboard path is the one where it would be
+// easiest to regress silently: a lone shelf used to fall into the single
+// non-artwork branch (moveOpening, leaving its works behind), and a
+// multi-selection into the arrange session, which moves artwork members only.
+describe("useArrangeNudgeShortcuts — shelf assemblies", () => {
+  const shelf: WallObject = {
+    id: "placement-shelf-1",
+    kind: "shelf",
+    wallId: "wall-north",
+    xMm: 1000,
+    // Slab centre 1180 with a 40mm thickness → top face at 1200.
+    yMm: 1180,
+    widthMm: 1200,
+    heightMm: 40,
+    depthMm: 300
+  };
+  // Bottom edge exactly on the shelf's top face, x-span inside it: a rider.
+  const rider: WallObject = {
+    id: "placement-rider-1",
+    kind: "artwork",
+    artworkId: "art-2",
+    wallId: "wall-north",
+    xMm: 900,
+    yMm: 1200 + 200,
+    widthMm: 300,
+    heightMm: 400
+  };
+  // Same wall, well above the slab: hanging near a shelf is not standing on it.
+  const bystander: WallObject = {
+    id: "placement-bystander-1",
+    kind: "artwork",
+    artworkId: "art-3",
+    wallId: "wall-north",
+    xMm: 900,
+    yMm: 2200,
+    widthMm: 300,
+    heightMm: 400
+  };
+
+  it("moves a selected shelf AND its riders in one batched commit", () => {
+    const { moveWallObjectsGroup, moveOpening, setArrangeSessionPreview } =
+      renderNudgeHarness({
+        project: projectWith([shelf, rider, bystander]),
+        selectedObjectIds: [shelf.id]
+      });
+
+    const event = arrowEvent("ArrowRight");
+    act(() => {
+      document.body.dispatchEvent(event);
+    });
+
+    expect(moveWallObjectsGroup).toHaveBeenCalledTimes(1);
+    const [moves] = vi.mocked(moveWallObjectsGroup).mock.calls[0]!;
+    expect(moves).toEqual([
+      { id: shelf.id, xMm: shelf.xMm + 12.7, yMm: shelf.yMm },
+      { id: rider.id, xMm: rider.xMm + 12.7, yMm: rider.yMm }
+    ]);
+    // Not the opening path (which would leave the works behind), and not the
+    // arrange session (which would move the works and leave the slab).
+    expect(moveOpening).not.toHaveBeenCalled();
+    expect(setArrangeSessionPreview).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("carries the riders when the shelf is nudged as part of a multi-selection", () => {
+    const { moveWallObjectsGroup, setArrangeSessionPreview } = renderNudgeHarness({
+      project: projectWith([shelf, rider, bystander]),
+      selectedObjectIds: [shelf.id, bystander.id]
+    });
+
+    act(() => {
+      document.body.dispatchEvent(arrowEvent("ArrowUp"));
+    });
+
+    const [moves] = vi.mocked(moveWallObjectsGroup).mock.calls[0]!;
+    expect(moves.map((move: { id: string }) => move.id)).toEqual([
+      shelf.id,
+      rider.id,
+      bystander.id
+    ]);
+    // Every member takes the SAME delta — the assembly stays rigid.
+    for (const move of moves) {
+      const before = [shelf, rider, bystander].find((object) => object.id === move.id)!;
+      expect(move.yMm).toBeCloseTo(before.yMm + 12.7);
+      expect(move.xMm).toBeCloseTo(before.xMm);
+    }
+    expect(setArrangeSessionPreview).not.toHaveBeenCalled();
+  });
+
+  it("declines in 3D so the arrows keep flying the camera", () => {
+    const { moveWallObjectsGroup, cameraTravelKeyDown } = renderNudgeHarness({
+      viewMode: "3d",
+      project: projectWith([shelf, rider]),
+      selectedObjectIds: [shelf.id]
+    });
+
+    const event = arrowEvent("ArrowRight");
+    act(() => {
+      document.body.dispatchEvent(event);
+    });
+
+    expect(moveWallObjectsGroup).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+    expect(cameraTravelKeyDown).toHaveBeenCalled();
   });
 });

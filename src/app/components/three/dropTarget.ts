@@ -14,6 +14,11 @@
 
 import { clamp } from "../../../domain/geometry/scalar";
 import { projectPointToWall, type FloorWall } from "../../../domain/geometry/planObjects";
+import {
+  SHELF_SEAT_CAPTURE_3D_MM,
+  seatOnShelfTop
+} from "../../../domain/placement/shelfSeating";
+import type { WallObject } from "../../../domain/project";
 import { MM_TO_WORLD } from "./coordinates";
 
 // The `userData` key wall panels and floor surfaces carry so a raycast hit can
@@ -127,6 +132,10 @@ export type ThreeDropResolution =
       xMm: number;
       // Center height above the floor.
       yMm: number;
+      // The shelf this placement stands the work ON, when the drop/drag was
+      // captured by one (seatOnShelfTop). Absent for an ordinary free hang.
+      // The view lights the slab up while it is set.
+      shelfId?: string;
       ghost: DropGhost3d;
     }
   | {
@@ -169,6 +178,17 @@ export function resolveThreeDrop(args: {
   // that grip instead of teleporting its centre under the cursor. Applied
   // BEFORE the clamp, so an offset placement is still kept whole on its wall.
   offsetMm?: { xMm: number; yMm: number };
+  // SHELF SEATING (opt-in). 3D does not snap — that is its contract — but a
+  // shelf is a SURFACE, not a snap line: a work released over a slab is a work
+  // the curator meant to stand on it, exactly as in plan and elevation, and
+  // refusing to seat it here is what made 3D the one view a shelf could not be
+  // aimed at. Off by default so a caller that has no wall objects (or is
+  // moving something that cannot be a rider) keeps the old geometry verbatim.
+  wallObjects?: readonly WallObject[];
+  seatOnShelves?: boolean;
+  // The moving object's own id, so a drag never seats an object on itself.
+  // Absent for a checklist drop, which is not placed yet.
+  movingId?: string;
 }): ThreeDropResolution | null {
   const { point, tag, walls, dims } = args;
   const offsetMm = args.offsetMm ?? { xMm: 0, yMm: 0 };
@@ -202,11 +222,31 @@ export function resolveThreeDrop(args: {
     dims.wallWidthMm,
     wall.lengthMm
   );
-  const yMm = clampSpan(
+  const clampedYMm = clampSpan(
     worldHeightToMm(point) + offsetMm.yMm,
     dims.wallHeightMm,
     wall.heightMm
   );
+  // Seating runs on the CLAMPED placement, so the slab test sees the x and y
+  // that would actually commit, and its own result is trusted unclamped: a
+  // shelf is on the wall by construction, and re-clamping a seated y would
+  // silently unseat a work standing on a slab near the wall's top.
+  const seated =
+    args.seatOnShelves && args.wallObjects
+      ? seatOnShelfTop(
+          {
+            id: args.movingId,
+            wallId: wall.id,
+            xMm,
+            widthMm: dims.wallWidthMm,
+            heightMm: dims.wallHeightMm,
+            yMm: clampedYMm
+          },
+          args.wallObjects,
+          SHELF_SEAT_CAPTURE_3D_MM
+        )
+      : null;
+  const yMm = seated?.yMm ?? clampedYMm;
 
   // The ghost rides the clamped x (not the raw hit), so the preview shows the
   // placement that will actually commit.
@@ -219,6 +259,7 @@ export function resolveThreeDrop(args: {
     wallId: wall.id,
     xMm,
     yMm,
+    shelfId: seated?.shelfId,
     ghost: {
       kind: "wall",
       centerXMm: wall.startFloorMm.xMm + dxMm * t,

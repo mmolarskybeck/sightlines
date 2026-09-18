@@ -781,3 +781,13 @@ describe("resolvePlanPlacement — determinism", () => {
     expect(WALL_CAPTURE_PX).toBe(24);
   });
 });
+
+describe("floatPolicyForKind — shelf", () => {
+  it("floats, so a click clear of every wall resolves to floor and can be refused", () => {
+    // NOT "capture-any" (wall text's policy): a shelf is wall-only, and
+    // capture-any would fling it onto whichever wall happens to be nearest
+    // anywhere in the room instead of letting the placement action decline
+    // with a hint.
+    expect(floatPolicyForKind("shelf")).toBe("float");
+  });
+});

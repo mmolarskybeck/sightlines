@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 export const CURRENT_ARTWORK_SCHEMA_VERSION = 1;
 export const CURRENT_ASSET_SCHEMA_VERSION = 1;
 
@@ -477,11 +477,34 @@ export type CaseWallObject = WallObjectBase & {
   depthMm: number;
 };
 
+// A wall shelf: a slab cantilevered off the wall that WORKS STAND ON. It is
+// its own wall object rather than a property of a placement precisely because
+// one shelf holds several works (USER DECISION) — the works that stand on it
+// are ordinary wall artworks, and which ones those are is DERIVED from
+// geometry at move time (domain/placement/shelfRiders.ts), never stored. Do
+// not reach for WallObjectBase.groupId: it is dead data that nothing reads or
+// writes.
+//
+// Like a case it adds a required `depthMm`, so it is NOT purely additive to
+// the stored shape and rides the v6→v7 schema-version bump. The field meanings
+// are the case's, one step further apart: `yMm` is the slab's CENTRE height
+// (shelfTopYMm adds half the thickness to get the face a work stands on),
+// `heightMm` is the slab's vertical THICKNESS, and `depthMm` is its protrusion
+// from the wall face. It never blocks placement and never pairs.
+export type ShelfWallObject = WallObjectBase & {
+  kind: "shelf";
+  // Protrusion from the wall face, exactly as on CaseWallObject — the two are
+  // the same physical situation (a body cantilevered into the room) and the
+  // one plan-depth resolver reads both through the same branch.
+  depthMm: number;
+};
+
 export type WallObject =
   | ArtworkWallObject
   | OpeningWallObject
   | WallTextWallObject
-  | CaseWallObject;
+  | CaseWallObject
+  | ShelfWallObject;
 
 // Display-case curatorial defaults live beside the glyph geometry that
 // consumes them — see caseGlyphs.ts. Re-exported here so schema/placement
@@ -493,6 +516,20 @@ export {
   DEFAULT_WALL_CASE_DEPTH_MM,
   DEFAULT_WALL_CASE_CENTER_Y_MM
 } from "./geometry/caseGlyphs";
+
+// Shelf curatorial defaults and the shelf-top tolerance, same arrangement as
+// the case defaults above: they live beside the glyph geometry that consumes
+// them (geometry/shelfGlyphs.ts) and are re-exported here so schema, placement
+// and inspector code keep importing shelf shapes and their defaults from one
+// place. shelfGlyphs.ts may therefore import only TYPES from this module.
+export {
+  DEFAULT_SHELF_WIDTH_MM,
+  DEFAULT_SHELF_THICKNESS_MM,
+  DEFAULT_SHELF_DEPTH_MM,
+  DEFAULT_SHELF_TOP_MM,
+  SHELF_END_MARGIN_MM,
+  SHELF_TOP_SNAP_TOLERANCE_MM
+} from "./geometry/shelfGlyphs";
 
 // Editable default depth for floor-placed objects lives beside
 // WALL_OBJECT_PLAN_DEPTH_MM in geometry/planObjects.ts so placement/artworkForm

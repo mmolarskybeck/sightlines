@@ -482,6 +482,28 @@ export function elevationPageMarks(
     }
   });
 
+  // Wall shelves: one filled slab band each, from the scene entry's span (the
+  // same numbers drawElevationShelf prints) — filled rather than outlined, the
+  // way the canvas draws it, because a shelf is a surface a work stands on.
+  scene.shelves.forEach((shelf, i) => {
+    const a = xf.point({
+      xMm: shelf.xMinMm,
+      yMm: scene.wallHeightMm - (shelf.yMm + shelf.heightMm / 2)
+    });
+    marks.push(
+      <rect
+        key={`shelf-${i}`}
+        x={a.x}
+        y={a.y}
+        width={(shelf.xMaxMm - shelf.xMinMm) * xf.scalePtPerMm}
+        height={shelf.heightMm * xf.scalePtPerMm}
+        fill={FILL_WEAK}
+        stroke={MUTED}
+        strokeWidth={0.75}
+      />
+    );
+  });
+
   // Abutting partitions: a solid slab over the wall objects, same ink/opacity
   // as the plan page's partition slabs.
   scene.partitionProfiles.forEach((profile, i) => {

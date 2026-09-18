@@ -210,6 +210,21 @@ export type WallCase3d = {
   depthMm: number; // protrusion from the wall face into the room
 };
 
+// A wall shelf riding the wall face: a slab cantilevered off the wall,
+// protruding into the room by `depthMm` — the same construction as WallCase3d
+// beside it, and deliberately a SEPARATE entry type rather than a flag on it,
+// because the render layer draws a solid slab where the case draws a glass
+// box, and because a shelf is selectable-but-not-draggable in 3D this round.
+// Wall-local centre coordinates like the artwork/wall-text/case entries.
+export type WallShelf3d = {
+  objectId: string;
+  xMm: number; // wall-local centre along the wall, from `start`
+  yMm: number; // wall-local SLAB CENTRE height, 0 = floor (not the top face)
+  widthMm: number;
+  heightMm: number; // the slab's vertical thickness
+  depthMm: number; // protrusion from the wall face into the room
+};
+
 export type WallPanel3d = {
   wallId: string;
   // Floor-space endpoints. ORIENTATION CONVENTION: walls are wound so the room
@@ -224,6 +239,7 @@ export type WallPanel3d = {
   blockedZones: WallBlockedZone3d[];
   wallTexts: WallText3d[];
   cases: WallCase3d[];
+  shelves: WallShelf3d[];
 };
 
 // A partition slab (spec §7.1): two single-sided face panels (reusing
@@ -562,12 +578,14 @@ function derivePanelContents(
   blockedZones: WallBlockedZone3d[];
   wallTexts: WallText3d[];
   cases: WallCase3d[];
+  shelves: WallShelf3d[];
 } {
   const artworks: WallArtwork3d[] = [];
   const blockedZones: WallBlockedZone3d[] = [];
   const holes: Hole3d[] = [];
   const wallTexts: WallText3d[] = [];
   const cases: WallCase3d[] = [];
+  const shelves: WallShelf3d[] = [];
   for (const object of objects) {
     if (object.kind === "artwork") {
       const artwork = artworksById.get(object.artworkId);
@@ -595,6 +613,15 @@ function derivePanelContents(
       });
     } else if (object.kind === "case") {
       cases.push({
+        objectId: object.id,
+        xMm: toLocalX(object.xMm),
+        yMm: object.yMm,
+        widthMm: object.widthMm,
+        heightMm: object.heightMm,
+        depthMm: object.depthMm
+      });
+    } else if (object.kind === "shelf") {
+      shelves.push({
         objectId: object.id,
         xMm: toLocalX(object.xMm),
         yMm: object.yMm,
@@ -705,7 +732,7 @@ function derivePanelContents(
       });
     }
   }
-  return { holes, artworks, blockedZones, wallTexts, cases };
+  return { holes, artworks, blockedZones, wallTexts, cases, shelves };
 }
 
 function openingVerticalExtent(

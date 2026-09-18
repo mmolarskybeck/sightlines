@@ -56,6 +56,7 @@ export function moveObjectNoun(kind: WallObject["kind"]): string {
   if (kind === "artwork") return "artwork";
   if (kind === "wall-text") return "wall text";
   if (kind === "case") return "display case";
+  if (kind === "shelf") return "shelf";
   return openingNoun(kind);
 }
 

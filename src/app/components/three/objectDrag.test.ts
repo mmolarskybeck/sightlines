@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getPlaceableFloorWalls, type FloorWall } from "../../../domain/geometry/planObjects";
-import type { Floor, Project, Room } from "../../../domain/project";
+import type { Floor, Project, Room, ShelfWallObject } from "../../../domain/project";
 import { MM_TO_WORLD } from "./coordinates";
 import type { DropDimsMm } from "./dropTarget";
 import {
@@ -313,5 +313,82 @@ describe("projectWithDragPreview", () => {
     });
     expect(next.floorObjects[0]).toMatchObject({ xMm: 2500, yMm: 1750 });
     expect(next.wallObjects).toBe(project.wallObjects);
+  });
+});
+
+// A 1200-wide slab on wall-0 whose top face is at 1000mm.
+const SHELF: ShelfWallObject = {
+  id: "shelf-1",
+  kind: "shelf",
+  wallId: "wall-0",
+  xMm: 3000,
+  yMm: 980,
+  widthMm: 1200,
+  heightMm: 40,
+  depthMm: 300
+};
+
+describe("resolveDragMove shelf seating", () => {
+  const artworkSource: ThreeDragSource = {
+    anchor: "wall",
+    objectId: "obj-1",
+    kind: "artwork",
+    wallId: "wall-0",
+    xMm: 3000,
+    yMm: 1500,
+    dims: { wallWidthMm: 600, wallHeightMm: 800, floorWidthMm: 600, floorDepthMm: 400 }
+  };
+  const noOffset = { xMm: 0, yMm: 0 };
+
+  it("stands a dragged work on the slab and names the shelf", () => {
+    expect(
+      resolveDragMove({
+        // Bottom edge at 1100, 100mm above the slab's 1000 top face.
+        surface: wallSurface("wall-0", 3000, 1500, 0),
+        source: artworkSource,
+        offsetMm: noOffset,
+        walls,
+        wallObjects: [SHELF],
+        seatOnShelves: true
+      })
+    ).toEqual({ anchor: "wall", wallId: "wall-0", xMm: 3000, yMm: 1400, shelfId: "shelf-1" });
+  });
+
+  it("hangs freely when the caller withholds seating (the ⌘/Ctrl bypass)", () => {
+    const move = resolveDragMove({
+      surface: wallSurface("wall-0", 3000, 1500, 0),
+      source: artworkSource,
+      offsetMm: noOffset,
+      walls,
+      wallObjects: [SHELF],
+      seatOnShelves: false
+    });
+    expect(move).toMatchObject({ yMm: 1500 });
+    expect(move!.anchor === "wall" && move!.shelfId).toBeUndefined();
+  });
+
+  it("never seats a NON-artwork wall object, even when asked to", () => {
+    const move = resolveDragMove({
+      surface: wallSurface("wall-0", 3000, 1500, 0),
+      source: { ...artworkSource, kind: "case" },
+      offsetMm: noOffset,
+      walls,
+      wallObjects: [SHELF],
+      seatOnShelves: true
+    });
+    expect(move).toMatchObject({ yMm: 1500 });
+    expect(move!.anchor === "wall" && move!.shelfId).toBeUndefined();
+  });
+
+  it("never seats an object on itself", () => {
+    const move = resolveDragMove({
+      surface: wallSurface("wall-0", 3000, 1500, 0),
+      source: { ...artworkSource, objectId: "shelf-1" },
+      offsetMm: noOffset,
+      walls,
+      wallObjects: [SHELF],
+      seatOnShelves: true
+    });
+    expect(move!.anchor === "wall" && move!.shelfId).toBeUndefined();
   });
 });

@@ -1,4 +1,5 @@
-import type { WallObject, WallObjectBase } from "../project";
+import type { ShelfWallObject, WallObject, WallObjectBase } from "../project";
+import { shelfTopYMm } from "../geometry/shelfGlyphs";
 import { getGridSnapTargets } from "./gridSnapTargets";
 import {
   resolveSnap,
@@ -12,6 +13,18 @@ export type ArtworkSize = {
   widthMm: number;
   heightMm: number;
 };
+
+// The shelves a moving object could come to REST ON, already filtered by the
+// caller to those on the same wall whose x-span overlaps the moving object at
+// its current x (the moving object is a work standing on a slab, not a work
+// floating past one two metres away). The slab's vertical extent is what the
+// snap itself needs (`shelfTopYMm` turns the stored centre into the face a
+// work actually stands on); its x-span is read only to bound the GUIDE to the
+// slab, so "on the shelf" cannot be mistaken for the full-wall centerline.
+export type ShelfSnapSource = Pick<
+  ShelfWallObject,
+  "id" | "yMm" | "heightMm" | "xMm" | "widthMm"
+>;
 
 // The x-axis neighbor tiers (neighbor-center + neighbor-edge) for a set of
 // neighbors, given the moving object's width. Extracted so plan snapping can
@@ -75,8 +88,8 @@ export function getNeighborXSnapTargets(
 // primary tier (above the centerline — doors are expected to sit on the
 // floor); for artwork/windows/blocked zones the eyeline comes first and the
 // floor slots directly below it, above the neighbor and grid tiers. So the
-// per-axis ordering reads: [floor first for doors] > centerline > floor >
-// neighbor-center > neighbor-edge > grid.
+// per-axis ordering reads: [floor first for doors] > shelf-top > centerline >
+// floor > neighbor-center > neighbor-edge > grid.
 export function getArtworkSnapTargets(args: {
   centerlineYMm: number;
   wallLengthMm: number;
@@ -85,6 +98,7 @@ export function getArtworkSnapTargets(args: {
   neighbors: WallObjectBase[];
   movingSize: ArtworkSize;
   movingKind?: WallObject["kind"];
+  shelves?: readonly ShelfSnapSource[];
 }): SnapTarget[] {
   const {
     centerlineYMm,
@@ -93,7 +107,8 @@ export function getArtworkSnapTargets(args: {
     gridIntervalMm,
     neighbors,
     movingSize,
-    movingKind
+    movingKind,
+    shelves
   } = args;
 
   const targets: SnapTarget[] = [
@@ -118,6 +133,32 @@ export function getArtworkSnapTargets(args: {
       point: { xMm: 0, yMm: centerlineYMm }
     }
   ];
+
+  // Shelf tops: the center-y that stands the moving object's BOTTOM edge on a
+  // shelf's top face — shaped exactly like the floor target above, because it
+  // IS the same idea (settle onto a surface), just a surface 1200mm up. One
+  // target per supplied shelf; the caller has already narrowed the list to
+  // shelves the object actually overlaps horizontally. Ranked above the
+  // centerline by KIND_PRIORITY (see resolveSnap.ts).
+  //
+  // The guide is drawn ON the top face (guidePositionMm) and clipped to the
+  // slab's own x-span (extentMm) rather than through the moving work's centre
+  // across the whole wall: a full-width line through the middle of the work is
+  // exactly what the centerline snap draws, so without these two the curator
+  // cannot tell "standing on the shelf" from "on the eyeline".
+  for (const shelf of shelves ?? []) {
+    targets.push({
+      id: `shelf-top:${shelf.id}`,
+      kind: "shelf-top",
+      axis: "y",
+      point: { xMm: 0, yMm: shelfTopYMm(shelf) + movingSize.heightMm / 2 },
+      guidePositionMm: shelfTopYMm(shelf),
+      extentMm: {
+        startMm: shelf.xMm - shelf.widthMm / 2,
+        endMm: shelf.xMm + shelf.widthMm / 2
+      }
+    });
+  }
 
   // The x-axis neighbor tiers, shared verbatim with plan snapping's wall-local
   // resolve via getNeighborXSnapTargets.
@@ -183,6 +224,7 @@ export function resolveArtworkSnap(
     neighbors: WallObjectBase[];
     movingSize: ArtworkSize;
     movingKind?: WallObject["kind"];
+    shelves?: readonly ShelfSnapSource[];
     snapToGrid: boolean;
     thresholdMm: number;
     previousSnapTargetIds?: SnapTargetIds;
@@ -195,7 +237,8 @@ export function resolveArtworkSnap(
     gridIntervalMm: args.gridIntervalMm,
     neighbors: args.neighbors,
     movingSize: args.movingSize,
-    movingKind: args.movingKind
+    movingKind: args.movingKind,
+    shelves: args.shelves
   });
 
   const candidates = args.snapToGrid

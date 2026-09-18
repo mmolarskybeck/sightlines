@@ -39,6 +39,7 @@ export function SceneRooms({
   getBlob,
   artworksById,
   selectedObjectIds,
+  shelfSnapTargetId,
   selectedArtworkId,
   selectedWallId,
   onSelectWall,
@@ -54,6 +55,10 @@ export function SceneRooms({
   // off the Artwork record (the derived scene doesn't carry them).
   artworksById: ReadonlyMap<string, Artwork>;
   selectedObjectIds: string[];
+  // The shelf a live drop/drag would stand its work ON (ThreeDView resolves it
+  // through seatOnShelfTop). Pass-through only: it reaches WallShelfMesh, which
+  // outlines that slab exactly as a selected one.
+  shelfSnapTargetId?: string | null;
   selectedArtworkId: string | null;
   selectedWallId: string | null;
   onSelectWall: (wallId: string) => void;
@@ -101,6 +106,7 @@ export function SceneRooms({
               artworksById={artworksById}
               isSelected={wall.wallId === selectedWallId}
               selectedObjectIds={selectedObjectIds}
+              shelfSnapTargetId={shelfSnapTargetId}
               selectedArtworkId={selectedArtworkId}
               onSelectWall={onSelectWall}
               onSelectObject={onSelectObject}
@@ -114,6 +120,7 @@ export function SceneRooms({
               texturesByAssetId={texturesByAssetId}
               artworksById={artworksById}
               selectedObjectIds={selectedObjectIds}
+              shelfSnapTargetId={shelfSnapTargetId}
               selectedArtworkId={selectedArtworkId}
               selectedWallId={selectedWallId}
               onSelectWall={onSelectWall}

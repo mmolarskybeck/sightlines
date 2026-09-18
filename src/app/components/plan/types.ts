@@ -164,6 +164,11 @@ export type DropGhostState = {
   // in the danger style and the drop is refused (artwork is wall-only).
   placement: ResolvedPlacement;
   activeGuides: Guide[];
+  // The shelf this drop would stand the work ON (seatOnAnyOverlappingShelf),
+  // absent when it would hang at the centerline. Present so the slab's plan
+  // glyph can light up while the work is captured over it — the same "a
+  // surface announces itself" feedback the elevation guide gives.
+  shelfId?: string;
 };
 
 // The in-progress polygon-room draw gesture, transient until close/cancel and

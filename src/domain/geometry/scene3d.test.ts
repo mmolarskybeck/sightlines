@@ -246,6 +246,43 @@ describe("deriveScene3d — display cases", () => {
     expect(panel.holes).toHaveLength(0);
   });
 
+  it("emits a wall shelf onto its wall panel beside the cases, never as one", () => {
+    const shelf: WallObject = {
+      id: "wo-shelf",
+      kind: "shelf",
+      wallId: "room-a-wall-0",
+      xMm: 1000,
+      yMm: 1180,
+      widthMm: 1200,
+      heightMm: 40,
+      depthMm: 300
+    };
+    const scene = deriveScene3d(
+      makeProject([makePlacement(makeRoom("room-a", CCW_RECT, 2500))], {
+        wallObjects: [shelf]
+      })
+    );
+
+    const panel = scene.rooms[0].walls.find((wall) => wall.wallId === "room-a-wall-0")!;
+    expect(panel.shelves).toEqual([
+      {
+        objectId: "wo-shelf",
+        xMm: 1000,
+        // The SLAB CENTRE, as stored — the render layer adds half the
+        // thickness itself when it needs the top face.
+        yMm: 1180,
+        widthMm: 1200,
+        heightMm: 40,
+        depthMm: 300
+      }
+    ]);
+    // Its own bucket, and emphatically not a hole punched through the wall.
+    expect(panel.cases).toHaveLength(0);
+    expect(panel.artworks).toHaveLength(0);
+    expect(panel.blockedZones).toHaveLength(0);
+    expect(panel.holes).toHaveLength(0);
+  });
+
   it("emits a floor case as a floor object carrying kind 'case' and its dimensions", () => {
     const floorCase: FloorObject = {
       id: "fo-case",

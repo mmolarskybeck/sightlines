@@ -27,11 +27,16 @@ import { type InsertToolKind } from "../../../domain/placement/createOpening";
 import { getDefaultInsertToolSizeMm } from "../../../domain/placement/createWallText";
 import { effectiveWallObjectPlanDepthMm } from "../../../domain/placement/artworkForm";
 import {
+  expandWithShelfRiders,
+  getShelfRiders
+} from "../../../domain/placement/shelfRiders";
+import {
   DEFAULT_FLOOR_CASE_DEPTH_MM,
   DEFAULT_WALL_CASE_DEPTH_MM,
   DEFAULT_WALL_CASE_HEIGHT_MM,
   DEFAULT_WALL_CASE_WIDTH_MM
 } from "../../../domain/geometry/caseGlyphs";
+import { DEFAULT_SHELF_DEPTH_MM } from "../../../domain/geometry/shelfGlyphs";
 import {
   DEFAULT_FLOOR_OBJECT_DEPTH_MM,
   type Artwork,
@@ -234,7 +239,13 @@ export function PlanView({
   onCommitPlanMoveGroup?: (
     moves: { id: string; xMm: number; yMm?: number; wallId?: string }[]
   ) => void;
-  onPlaceArtwork?: (artworkId: string, wallId: string, xMm: number, yMm: number) => void;
+  onPlaceArtwork?: (
+    artworkId: string,
+    wallId: string,
+    xMm: number,
+    yMm: number,
+    seatOnShelfId?: string
+  ) => void;
   onPlaceArtworkOnFloor?: (artworkId: string, xMm: number, yMm: number) => void;
   // IDs are placements, never artwork-library records.
   onMarqueeSelect?: (ids: string[], additive: boolean) => void;
@@ -678,12 +689,17 @@ export function PlanView({
     const { widthMm, heightMm } = getDefaultInsertToolSizeMm(activeTool);
     // Floor-footprinted tools (blocked zone, and the case's open-floor default)
     // carry their own front-back depth; wall openings use the thin plan depth.
+    // A shelf has no open-floor form at all — a floor click is refused — but it
+    // still protrudes, so its ghost keeps the slab's real depth wherever it is
+    // drawn rather than collapsing to the through-wall band.
     const depthMm =
       activeTool === "blocked-zone"
         ? DEFAULT_FLOOR_OBJECT_DEPTH_MM
         : activeTool === "case"
           ? DEFAULT_FLOOR_CASE_DEPTH_MM
-          : WALL_OBJECT_PLAN_DEPTH_MM;
+          : activeTool === "shelf"
+            ? DEFAULT_SHELF_DEPTH_MM
+            : WALL_OBJECT_PLAN_DEPTH_MM;
     return { widthMm, heightMm, depthMm };
   }, [activeTool]);
 
@@ -750,7 +766,25 @@ export function PlanView({
       // Resolve the live members of the selection in the exact shape the pointer
       // drag builds: a wall object whose wall vanished drops out, a floor object
       // carries its own center. Stale ids simply don't resolve.
-      const selectedSet = new Set(selectedObjectIds);
+      // Expanded exactly as the pointer drag expands it (beginObjectDrag): a
+      // selected shelf brings the works standing on it, so an arrow key moves
+      // the assembly rigidly and commits it in ONE undo entry through the group
+      // branch below. Idempotent, so a selection that already holds the riders
+      // is unchanged.
+      const selectedSet = new Set(
+        expandWithShelfRiders(selectedObjectIds, project.wallObjects, artworksById)
+      );
+      // Which shelf each rider stands on — derived here, never stored, and
+      // declared on the member so resolvePlanObjectNudge's group branch keeps
+      // the assembly rigid (see planGroupMove.ts).
+      const shelfIdByRiderId = new Map<string, string>();
+      for (const object of project.wallObjects) {
+        if (object.kind !== "shelf" || !selectedSet.has(object.id)) continue;
+        for (const rider of getShelfRiders(object, project.wallObjects, artworksById)) {
+          if (!selectedSet.has(rider.id) || shelfIdByRiderId.has(rider.id)) continue;
+          shelfIdByRiderId.set(rider.id, object.id);
+        }
+      }
       const wallsById = new Map(floorWallsForTool.map((wall) => [wall.id, wall]));
       const members: PlanGroupMember[] = [];
       for (const object of project.wallObjects) {
@@ -764,6 +798,7 @@ export function PlanView({
           object.kind === "artwork" ? artworksById?.get(object.artworkId) : undefined
         );
         const rest = getWallObjectPlanRect(wall, object, depthMm);
+        const ridesShelfId = shelfIdByRiderId.get(object.id);
         members.push({
           id: object.id,
           anchor: "wall",
@@ -771,7 +806,8 @@ export function PlanView({
           wall,
           worldCenterMm: { xMm: rest.centerXMm, yMm: rest.centerYMm },
           widthMm: object.widthMm,
-          depthMm
+          depthMm,
+          ...(ridesShelfId ? { ridesShelfId } : {})
         });
       }
       for (const object of project.floorObjects) {
@@ -1011,16 +1047,28 @@ export function PlanView({
       walls: openingToolWalls,
       wallObjects: snappingWallObjects,
       movingKind: activeTool,
-      // Blocked zones and cases float (wall capture only within capture
-      // distance, open floor otherwise); doors/windows/wall text always
-      // capture the nearest wall.
-      floatPolicy: (activeTool === "blocked-zone" || activeTool === "case"
+      // Blocked zones, cases and shelves float (wall capture only within
+      // capture distance, open floor otherwise); doors/windows/wall text always
+      // capture the nearest wall. A shelf floats for the opposite reason to a
+      // case: it is wall-only, so a click clear of every wall must resolve to a
+      // floor anchor the store REFUSES with a hint, rather than being flung
+      // onto whichever wall happens to be nearest (floatPolicyForKind).
+      floatPolicy: (activeTool === "blocked-zone" ||
+      activeTool === "case" ||
+      activeTool === "shelf"
         ? "float"
         : "capture-any") as FloatPolicy,
-      // Only a case protrudes off the wall, and a wall case's protrusion is
-      // always the wall-case depth — the open-floor footprint in `size` says
-      // nothing about it. Every other tool draws the nominal band (undefined).
-      wallFootprintDepthMm: activeTool === "case" ? caseWallToolSize.depthMm : undefined,
+      // The protrusion a wall-anchored ghost draws. A wall case's is always the
+      // wall-case depth (the open-floor footprint in `size` says nothing about
+      // it); a shelf's is its own default depth, since its `size` carries the
+      // slab's width × THICKNESS, not how far it reaches into the room. Every
+      // other tool draws the nominal band (undefined).
+      wallFootprintDepthMm:
+        activeTool === "case"
+          ? caseWallToolSize.depthMm
+          : activeTool === "shelf"
+            ? DEFAULT_SHELF_DEPTH_MM
+            : undefined,
       currentAnchorWallId: null,
       captureDistanceMm,
       gridTargets: gridSnapTargets,
@@ -1449,6 +1497,10 @@ export function PlanView({
           selectedArtworkId={exportMode ? null : selectedArtworkId}
           selectedOpeningId={exportMode ? null : selectedOpeningId}
           selectedObjectIds={exportMode ? [] : selectedObjectIds}
+          // The slab a checklist drop is currently captured over: the shelf's
+          // plan glyph lights up while the work would land on it, the plan
+          // half of "a surface announces itself".
+          snapTargetObjectId={exportMode ? null : (dropGhost?.shelfId ?? null)}
           consumeSelectSuppression={consumeSelectSuppression}
           beginObjectDrag={objectMove.beginObjectDrag}
           onSelectObject={onSelectObject}

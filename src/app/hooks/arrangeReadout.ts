@@ -86,7 +86,9 @@ function resolveBoundary(
       ? "Wall text"
       : object.kind === "case"
         ? "Display case"
-        : getOpeningKindLabel(object.kind);
+        : object.kind === "shelf"
+          ? "Shelf"
+          : getOpeningKindLabel(object.kind);
   return { type: "object", kind: object.kind, name };
 }
 

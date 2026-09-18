@@ -12,6 +12,10 @@ import {
 import { getGroupBounds, getIdsIntersectingRect } from "../../../domain/placement/groupBounds";
 import { getOverlapRule } from "../../../domain/placement/overlapPolicy";
 import type { Artwork, WallObject, WallObjectBase } from "../../../domain/project";
+import {
+  expandWithShelfRiders,
+  getShelfSnapCandidates
+} from "../../../domain/placement/shelfRiders";
 import { resolveArtworkSnap } from "../../../domain/snapping/artworkSnapTargets";
 import {
   quantizeXToCleanIncrement,
@@ -55,10 +59,13 @@ export type MoveDragState = {
     offsetFromGroupCenterMm: Vector2;
   }[];
   startGroupCenterMm?: Vector2;
-  // Alt-drag of one member of a multi-selection: the drag moves only the
-  // pressed object, but the release must still suppress the trailing click
-  // (the same suppressNextSelect mechanism group drags use) so the browser's
-  // post-drag click can't collapse the multi-selection to that one member.
+  // The pressed object belongs to a multi-selection, so the release must
+  // suppress the trailing click (the same suppressNextSelect mechanism group
+  // drags use) — otherwise the browser's post-drag click collapses the
+  // selection to the one object under the pointer. Set for an alt-drag of a
+  // single member AND for an ordinary group drag; NOT set for a shelf
+  // assembly derived from a single press, where the trailing click should
+  // still select the shelf the curator just grabbed.
   preserveSelection?: boolean;
   // Drag-barrier hysteresis (see dragBarriers.ts): the set of obstacle / wall-
   // edge ids this drag has already "popped" past (or started overlapping).
@@ -99,6 +106,10 @@ export type ElevationMoveDragInput = {
   // Client → wall-local mm. Stays in ElevationView because the measurement
   // gesture hook (called before this one) needs it too.
   toWallLocalMm: (clientX: number, clientY: number) => Vector2 | null;
+  // The wall this canvas is drawing. Read only to ask which of its objects a
+  // moving work could come to REST ON (getShelfSnapCandidates matches on
+  // wallId). Null/absent — no wall picked — simply means no shelf targets.
+  wallId: string | null;
   wallObjectsOnThisWall: WallObject[];
   artworksById?: Map<string, Artwork>;
   withResolvedArtworkFootprint: (object: WallObject) => WallObject;
@@ -157,6 +168,7 @@ export type ElevationMoveDragResult = {
 // scope changed.
 export function useElevationMoveDrag({
   toWallLocalMm,
+  wallId,
   wallObjectsOnThisWall,
   artworksById,
   withResolvedArtworkFootprint,
@@ -259,13 +271,25 @@ export function useElevationMoveDrag({
       );
       if (movedMm < 0.5) return;
 
+      // Whether or not the commit survives the collision gate, a release that
+      // came out of a multi-selection must not let the trailing click collapse
+      // it (see preserveSelection). Hoisted above the group branch because a
+      // shelf assembly can be a group WITHOUT being a multi-selection — it is
+      // derived from one press — and that press should still select the shelf.
+      if (current.preserveSelection) suppressNextSelect();
+
+      // A drag released with an additive-select modifier still down (⌘/Ctrl
+      // precision drag, or Shift held) ends with the browser's trailing click,
+      // which would otherwise read as an additive toggle and deselect the
+      // object that was just moved.
+      if (event.metaKey || event.ctrlKey || event.shiftKey) suppressNextSelect();
+
       // Group drag: one commit carrying every member's final center (both kinds
       // through the single onMoveWallObjects prop). Member center = the snapped
-      // group center plus that member's stored offset.
+      // group center plus that member's stored offset. A shelf's riders are
+      // members like any other, so a shelf and the works standing on it land in
+      // ONE undo entry.
       if (current.members) {
-        // Whether or not the commit survives the collision gate, the trailing
-        // click must not collapse the multi-selection (see suppressNextSelect).
-        suppressNextSelect();
         const moves = current.members.map((member) => ({
           id: member.id,
           xMm: current.previewCenterMm.xMm + member.offsetFromGroupCenterMm.xMm,
@@ -274,16 +298,6 @@ export function useElevationMoveDrag({
         onMoveWallObjects?.(moves);
         return;
       }
-
-      // Alt-drag of one group member: same single-object commit below, but the
-      // trailing click must not collapse the multi-selection it came from.
-      if (current.preserveSelection) suppressNextSelect();
-
-      // A drag released with an additive-select modifier still down (⌘/Ctrl
-      // precision drag, or Shift held) ends with the browser's trailing click,
-      // which would otherwise read as an additive toggle and deselect the
-      // object that was just moved.
-      if (event.metaKey || event.ctrlKey || event.shiftKey) suppressNextSelect();
 
       if (current.kind === "artwork") {
         onMovePlacement?.(current.wallObjectId, current.previewCenterMm.xMm, current.previewCenterMm.yMm);
@@ -401,6 +415,21 @@ export function useElevationMoveDrag({
       ...footprintNeighbors,
       ...partitionNeighborShims
     ];
+    // The shelves this move could come to REST ON — the y-axis "settle onto a
+    // surface" tier, ranked above the centerline (resolveSnap's KIND_PRIORITY).
+    // Offered only when what is moving is a WORK: a door or a wall case does
+    // not stand on a shelf, and a mixed group resolves as one virtual artwork
+    // (the same coercion the floor tier already rides, see the movingKind
+    // parameter). The pre-filter is the shared predicate from shelfRiders.ts,
+    // so "this work is over that shelf" means exactly the same thing here as
+    // it does when the shelf later decides what it carries.
+    const shelves =
+      movingKind === "artwork" && wallId
+        ? getShelfSnapCandidates(
+            { wallId, xMm: proposed.xMm, widthMm: sizeMm.widthMm },
+            footprintNeighbors
+          )
+        : [];
 
     if (precisionBypass) {
       // Free move, but hard barriers still apply (yielding + wall container are
@@ -431,6 +460,7 @@ export function useElevationMoveDrag({
       neighbors: snapNeighbors,
       movingSize: sizeMm,
       movingKind,
+      shelves,
       // Grid tier removed for elevation placement — the quantizer replaces it.
       snapToGrid: false,
       thresholdMm: snapThresholdMm,
@@ -603,20 +633,36 @@ export function useElevationMoveDrag({
     const startPointerMm = toWallLocalMm(event.clientX, event.clientY);
     if (!startPointerMm) return;
 
-    // Alt-drag opts out of the group branch: one member moves alone while the
-    // multi-selection survives the release (preserveSelection below).
-    const altSoloDrag =
-      event.altKey &&
-      selectedObjectIds.includes(wallObject.id) &&
-      selectedObjectIds.length > 1;
+    // Alt-drag opts out of the multi-selection group branch: one member moves
+    // alone while the selection survives the release (preserveSelection below).
+    // It does NOT opt out of carrying a shelf's riders — a slab that left its
+    // works floating in mid-air would be a lie about the room, not a power
+    // user's shortcut.
+    const inMultiSelection =
+      selectedObjectIds.includes(wallObject.id) && selectedObjectIds.length > 1;
+    const altSoloDrag = event.altKey && inMultiSelection;
 
-    // Group drag: the pressed object is part of a multi-selection. Resolve the
-    // live members from this wall (stale ids simply drop out), size the union
-    // box, and remember each member's offset from that box's center. Everything
-    // downstream then treats the group as one virtual object.
-    if (!altSoloDrag && selectedObjectIds.includes(wallObject.id) && selectedObjectIds.length > 1) {
+    // The MOVING SET, one expansion for every entry point: the multi-selection
+    // when the press is part of one, otherwise just the pressed object — then
+    // every shelf in it contributes the works standing on it (shelfRiders.ts).
+    // A single shelf drag and a multi-selection containing a shelf therefore
+    // travel through the same union-box group path below and commit in ONE undo
+    // entry. Idempotent, so a selection that already contains the riders is
+    // unchanged.
+    const movingIds = expandWithShelfRiders(
+      altSoloDrag || !inMultiSelection ? [wallObject.id] : selectedObjectIds,
+      wallObjectsOnThisWall,
+      artworksById
+    );
+
+    // Group drag: the moving set has more than one member — a multi-selection,
+    // or a shelf carrying riders. Resolve the live members from this wall
+    // (stale ids simply drop out), size the union box, and remember each
+    // member's offset from that box's center. Everything downstream then treats
+    // the group as one virtual object.
+    {
       const groupMembers: WallObject[] = wallObjectsOnThisWall.filter((object) =>
-        selectedObjectIds.includes(object.id)
+        movingIds.includes(object.id)
       );
       if (groupMembers.length > 1) {
         const footprintGroupMembers = groupMembers.map(withResolvedArtworkFootprint);
@@ -645,6 +691,7 @@ export function useElevationMoveDrag({
             },
             groupNeighbors
           ),
+          preserveSelection: inMultiSelection,
           members: groupMembers.map((member) => ({
             id: member.id,
             kind: member.kind,

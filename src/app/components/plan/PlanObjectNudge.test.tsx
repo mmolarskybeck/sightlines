@@ -236,3 +236,70 @@ describe("PlanView placed-object keyboard nudge", () => {
     expect(onCommitPlanMoveGroup).not.toHaveBeenCalled();
   });
 });
+
+// A shelf and the works standing on it are one rigid assembly on every move
+// path, the plan keyboard nudge included: a lone shelf here would otherwise go
+// through the SINGLE branch and slide out from under its works.
+describe("PlanView placed-object keyboard nudge — shelf assemblies", () => {
+  const shelf: WallObject = {
+    id: "shelf-1",
+    kind: "shelf",
+    wallId: "wall-north",
+    xMm: 2000,
+    // Slab centre 1180 with a 40mm thickness → top face at 1200.
+    yMm: 1180,
+    widthMm: 1200,
+    heightMm: 40,
+    depthMm: 300
+  };
+  // Bottom edge exactly on the slab's top face, x-span inside it: a rider.
+  const shelfRider: WallObject = {
+    id: "rider-1",
+    kind: "artwork",
+    artworkId: "art-3",
+    wallId: "wall-north",
+    xMm: 1900,
+    yMm: 1200 + 200,
+    widthMm: 300,
+    heightMm: 400
+  };
+
+  it("nudges a lone selected shelf and its riders as one group commit", () => {
+    useAppStore.setState({
+      project: seedProject({ wallObjects: [shelf, shelfRider], floorObjects: [] })
+    });
+    const { svg, onCommitPlanMove, onCommitPlanMoveGroup } = renderPlan({
+      selectedObjectIds: [shelf.id]
+    });
+
+    fireEvent.keyDown(svg, { key: "ArrowRight" });
+
+    expect(onCommitPlanMove).not.toHaveBeenCalled();
+    expect(onCommitPlanMoveGroup).toHaveBeenCalledTimes(1);
+    const [moves] = onCommitPlanMoveGroup.mock.calls[0];
+    expect(moves.map((move) => move.id).sort()).toEqual([shelfRider.id, shelf.id]);
+    const shelfMove = moves.find((move) => move.id === shelf.id)!;
+    const riderMove = moves.find((move) => move.id === shelfRider.id)!;
+    // Imperial off-grid step is 12.7mm (½″); wall-north runs +x from the origin.
+    expect(shelfMove.xMm).toBeCloseTo(shelf.xMm + 12.7, 1);
+    // Rigid: the rider keeps its exact offset from the slab.
+    expect(riderMove.xMm - shelfMove.xMm).toBeCloseTo(shelfRider.xMm - shelf.xMm, 1);
+  });
+
+  it("leaves a work merely hanging above the shelf out of the assembly", () => {
+    const hungWork: WallObject = { ...shelfRider, id: "hung-1", yMm: 2200 };
+    useAppStore.setState({
+      project: seedProject({ wallObjects: [shelf, hungWork], floorObjects: [] })
+    });
+    const { svg, onCommitPlanMove, onCommitPlanMoveGroup } = renderPlan({
+      selectedObjectIds: [shelf.id]
+    });
+
+    fireEvent.keyDown(svg, { key: "ArrowRight" });
+
+    // Nothing rides along, so this is an ordinary single-object nudge.
+    expect(onCommitPlanMoveGroup).not.toHaveBeenCalled();
+    expect(onCommitPlanMove).toHaveBeenCalledTimes(1);
+    expect(onCommitPlanMove.mock.calls[0][0]).toBe(shelf.id);
+  });
+});

@@ -70,6 +70,7 @@ import {
   drawElevationOpening,
   drawElevationWallText,
   drawElevationCase,
+  drawElevationShelf,
   drawElevationFloorCaseGhost,
   drawElevationMonitorGhost,
   drawElevationSuspendedArtworkGhost,
@@ -617,6 +618,11 @@ export async function createDocumentPdf(
       }
       for (const displayCase of scene.cases) {
         drawElevationCase(page, transform, displayCase);
+      }
+      // Shelves paint with the cases — furniture on the wall, under the
+      // dimension overlay, and never a ghost.
+      for (const shelf of scene.shelves) {
+        drawElevationShelf(page, transform, shelf);
       }
       // Abutting partitions paint over the wall objects — architecture meeting
       // this wall — but still under the dimension overlay below.

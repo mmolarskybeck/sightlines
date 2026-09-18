@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import { isMonitorArtwork, monitorBoxSizeMm } from "../../domain/geometry/monitorGlyphs";
 import {
   findNearestWall,
@@ -5,12 +6,18 @@ import {
   getPlaceableFloorWalls,
   getWallObjectPlanRect
 } from "../../domain/geometry/planObjects";
+import {
+  getPlacementFootprintMm,
+  withArtworkFootprintFromMap
+} from "../../domain/framing";
 import { clamp } from "../../domain/geometry/scalar";
 import { normalizeFloorSupport } from "../../domain/geometry/supportGlyphs";
 import { isHangableWall } from "../../domain/geometry/wallCascade";
 import { newId } from "../../domain/id";
 import { effectiveFloorDepthMm, type PlacementForm } from "../../domain/placement/artworkForm";
 import { createFloorCase, createWallCase } from "../../domain/placement/createCase";
+import { createShelf } from "../../domain/placement/createShelf";
+import { getShelfRiders } from "../../domain/placement/shelfRiders";
 import {
   clearOpeningPartners,
   includePairedOpenings,
@@ -31,10 +38,17 @@ import {
   type FloorMemory,
   type FloorObject,
   type Project,
+  type ShelfWallObject,
+  SHELF_END_MARGIN_MM,
   type WallObject
 } from "../../domain/project";
+import { shelfCenterYMmForTop, shelfTopYMm } from "../../domain/geometry/shelfGlyphs";
 import type { PlanPlacement } from "../../domain/snapping/planSnapTargets";
 import type { PixelAspect } from "../../domain/units/aspectFill";
+// A pure string helper with no React in it — the one thing this slice borrows
+// from the components tree, so the shelf-removal notice counts works the way
+// every other count in the app is worded.
+import { pluralize } from "../components/shared/pluralize";
 import { getProjectWalls } from "../projectWalls";
 import type { AppState, EditEntry, EditExtras } from "../store";
 import { moveObjectNoun, syncMovedPairHalves, syncPartnerMove } from "./openingEdits";
@@ -74,7 +88,8 @@ export type PlacementSliceActions = OpeningPlacementSliceActions & {
     wallId: string,
     xMm: number,
     yMm: number,
-    allowOverlap?: boolean
+    allowOverlap?: boolean,
+    opts?: { seatOnShelfId?: string }
   ) => Promise<void>;
   moveArtworkPlacement: (
     wallObjectId: string,
@@ -129,6 +144,29 @@ export type PlacementSliceActions = OpeningPlacementSliceActions & {
   updateWallCase: (
     wallObjectId: string,
     changes: Partial<Pick<CaseWallObject, "xMm" | "yMm" | "widthMm" | "heightMm" | "depthMm">>
+  ) => Promise<void>;
+  // The artwork inspector's one-click "Add shelf under this work": a slab as
+  // wide as the work plus SHELF_END_MARGIN_MM at each end, with its TOP at the
+  // work's bottom edge — so the work is standing on it by the rider test's own
+  // definition the moment it exists. Selects BOTH the work and the shelf, so
+  // the next drag moves the little assembly together. One undo step.
+  addShelfUnderWallArtwork: (wallObjectId: string) => Promise<void>;
+  // Numeric edits to a shelf, and the one edit path where the rider rule has
+  // to be applied by hand rather than by a move path's expanded moving set:
+  //
+  // - xMm / yMm (position) move the shelf's RIDERS by the same Δx and Δtop, in
+  //   the same applyEdit — a shelf that slides out from under its works would
+  //   leave them floating, and one undo must put everything back.
+  // - widthMm / depthMm / heightMm (thickness) keep the TOP face fixed — yMm is
+  //   recomputed from it — and leave the riders exactly where they are. Making
+  //   a slab thicker grows it DOWNWARD; the works standing on it never move.
+  //
+  // `heightMm` is the slab's thickness and `yMm` its centre (WallObjectBase's
+  // convention), so a caller that wants to set the TOP converts through
+  // shelfCenterYMmForTop — see ShelfInspector.
+  updateShelf: (
+    wallObjectId: string,
+    changes: Partial<Pick<ShelfWallObject, "xMm" | "yMm" | "widthMm" | "heightMm" | "depthMm">>
   ) => Promise<void>;
   commitPlanMove: (
     objectId: string,
@@ -211,6 +249,14 @@ export function createPlacementSlice(
     loadArtworkAspect
   } = internals;
 
+  // id→Artwork for the framing helpers. The shelf-rider test measures the
+  // FRAMED outer footprint (shelfRiders.ts), so every rider derivation in this
+  // slice has to hand it the library records or a matted/framed work silently
+  // stops being carried by the slab it is standing on.
+  function artworksById(): ReadonlyMap<string, Artwork> {
+    return new Map(get().libraryArtworks.map((artwork) => [artwork.id, artwork]));
+  }
+
   // Placement commit gate. Forbidden collisions always block; artwork
   // collisions block unless allowOverlap is true. null means do not commit.
   function gatePlacementWarnings(
@@ -292,6 +338,44 @@ export function createPlacementSlice(
     if (isHangableWall(project, wallId)) return false;
     set({ error: "This wall is open, so nothing can hang on it." });
     return true;
+  }
+
+  // Deleting a shelf LEAVES the works that were standing on it exactly where
+  // they are (USER DECISION), and there is no confirm dialog — nothing is lost,
+  // so there is nothing to confirm. But works suddenly hanging in mid-air with
+  // no visible support is precisely the thing the curator has to be told, so the
+  // removal says what it did. Riders are derived from the PRE-EDIT project, like
+  // everywhere else; a rider being deleted in the same breath is not "left in
+  // place" and is excluded.
+  //
+  // It speaks through the same sonner channel store.ts's reportSupportRepairs
+  // uses, NOT `error`: the error banner is for something that went wrong and
+  // sticks until the next edit clears it, while this is a calm statement of
+  // what a deliberate delete just did. toast.info, because nothing here needs
+  // fixing.
+  function noticeRemovedShelfRiders(project: Project, removedIds: Set<string>): void {
+    const shelves = project.wallObjects.filter(
+      (object): object is ShelfWallObject =>
+        object.kind === "shelf" && removedIds.has(object.id)
+    );
+    if (shelves.length === 0) return;
+
+    const riderIds = new Set<string>();
+    const artworks = artworksById();
+    for (const shelf of shelves) {
+      for (const rider of getShelfRiders(shelf, project.wallObjects, artworks)) {
+        if (removedIds.has(rider.id)) continue;
+        riderIds.add(rider.id);
+      }
+    }
+    if (riderIds.size === 0) return;
+
+    toast.info(
+      `${shelves.length === 1 ? "Shelf" : "Shelves"} removed; ${pluralize(
+        riderIds.size,
+        "work"
+      )} left in place.`
+    );
   }
 
   // --- commitPlanMove case handlers ----------------------------------------
@@ -780,7 +864,7 @@ export function createPlacementSlice(
 
   const actions: PlacementSliceActions = {
     ...openingActions,
-    async placeArtwork(artworkId, wallId, xMm, yMm, allowOverlap = false) {
+    async placeArtwork(artworkId, wallId, xMm, yMm, allowOverlap = false, opts) {
       const project = get().project;
       if (!project) return;
 
@@ -798,7 +882,21 @@ export function createPlacementSlice(
       }
 
       const aspect = await loadArtworkAspect(artwork);
-      const placement = createArtworkPlacement(artwork, wallId, xMm, yMm, aspect);
+      let placement = createArtworkPlacement(artwork, wallId, xMm, yMm, aspect);
+      // Re-seat after the size is baked: the caller seated a possibly placeholder-sized ghost.
+      if (opts?.seatOnShelfId) {
+        const shelf = project.wallObjects.find(
+          (o): o is ShelfWallObject =>
+            o.kind === "shelf" && o.id === opts.seatOnShelfId && o.wallId === wallId
+        );
+        if (shelf) {
+          // The FRAMED outer height: what stands on the slab is the outer edge
+          // (mat + frame), and the bands are symmetric, so the stored center
+          // sits half the OUTER height above the top face.
+          const footprintHeightMm = getPlacementFootprintMm(placement, artwork).heightMm;
+          placement = { ...placement, yMm: shelfTopYMm(shelf) + footprintHeightMm / 2 };
+        }
+      }
       const nextWallObjects = [...project.wallObjects, placement];
 
       await commitWallObjectEdit(
@@ -892,6 +990,9 @@ export function createPlacementSlice(
       };
 
       await applyEdit("Remove from wall", () => nextProject);
+      // AFTER the commit: persist() clears `error` on its way in, so a notice
+      // set before this line would be wiped by the very edit it describes.
+      noticeRemovedShelfRiders(project, removedIds);
     },
 
     async placeArtworkOnFloor(artworkId, xMm, yMm) {
@@ -1158,6 +1259,108 @@ export function createPlacementSlice(
       );
     },
 
+    async addShelfUnderWallArtwork(wallObjectId) {
+      const project = get().project;
+      if (!project) return;
+
+      const work = project.wallObjects.find(
+        (object): object is ArtworkWallObject =>
+          object.kind === "artwork" && object.id === wallObjectId
+      );
+      if (!work) return;
+      if (refuseOpenWall(project, work.wallId)) return;
+
+      // The work's FRAMED OUTER footprint, not its stored image box: the frame
+      // (and mat) is what physically rests on the slab, and the rider test
+      // (shelfRiders.ts) measures that same outer bottom edge against the top
+      // face — so seating the slab under the outer edge is what makes this work
+      // an actual rider of the shelf it just got, with no frame overlapping the
+      // slab. An unframed work resolves to its stored box, unchanged.
+      const foot = withArtworkFootprintFromMap(work, artworksById());
+      const shelf = createShelf({
+        wallId: work.wallId,
+        xMm: work.xMm,
+        topMm: foot.yMm - foot.heightMm / 2,
+        widthMm: foot.widthMm + 2 * SHELF_END_MARGIN_MM
+      });
+      const nextWallObjects = [...project.wallObjects, shelf];
+
+      // Shelves never block and never pair — nothing to validate, same as a
+      // case (allowOverlap: true still surfaces the warning without gating).
+      await commitWallObjectEdit("Add shelf", project, nextWallObjects, [shelf.id], true, {
+        // BOTH objects: the point of the one-click action is a little assembly
+        // the curator can immediately drag as one.
+        extras: selectionWrite(
+          { ...project, wallObjects: nextWallObjects },
+          { kind: "objects", ids: [work.id, shelf.id] },
+          get().wallContextId
+        )
+      });
+    },
+
+    async updateShelf(wallObjectId, changes) {
+      const project = get().project;
+      if (!project) return;
+
+      const target = project.wallObjects.find(
+        (object): object is ShelfWallObject =>
+          object.kind === "shelf" && object.id === wallObjectId
+      );
+      if (!target) return;
+
+      const nextXMm = changes.xMm ?? target.xMm;
+      const nextThicknessMm = changes.heightMm ?? target.heightMm;
+      // What the edit asks the TOP face to be. A yMm edit is read as a move of
+      // the whole slab at its CURRENT thickness (so "up 100" is up 100 for the
+      // works standing on it); a thickness/width/depth edit names no top at
+      // all, so the existing one is kept and yMm is recomputed beneath it.
+      const currentTopMm = shelfTopYMm(target);
+      const nextTopMm =
+        changes.yMm !== undefined ? changes.yMm + target.heightMm / 2 : currentTopMm;
+      const nextYMm = shelfCenterYMmForTop(nextTopMm, nextThicknessMm);
+
+      const nextShelf: ShelfWallObject = {
+        ...target,
+        xMm: nextXMm,
+        yMm: nextYMm,
+        widthMm: changes.widthMm ?? target.widthMm,
+        heightMm: nextThicknessMm,
+        depthMm: changes.depthMm ?? target.depthMm
+      };
+      const keys = ["xMm", "yMm", "widthMm", "heightMm", "depthMm"] as const;
+      if (keys.every((key) => nextShelf[key] === target[key])) return;
+
+      // Riders are derived from the PRE-EDIT geometry, exactly as every other
+      // move path derives them at gesture start: what the shelf was carrying
+      // when the edit was typed is what it carries away.
+      const deltaXMm = nextXMm - target.xMm;
+      const deltaTopMm = nextTopMm - currentTopMm;
+      const riderIds =
+        deltaXMm !== 0 || deltaTopMm !== 0
+          ? getShelfRiders(target, project.wallObjects, artworksById()).map(
+              (rider) => rider.id
+            )
+          : [];
+      const riderIdSet = new Set(riderIds);
+
+      const nextWallObjects = project.wallObjects.map((object) => {
+        if (object.id === wallObjectId) return nextShelf;
+        if (!riderIdSet.has(object.id)) return object;
+        return { ...object, xMm: object.xMm + deltaXMm, yMm: object.yMm + deltaTopMm };
+      });
+
+      // One commit — so one undo entry puts the slab and its works back
+      // together — and the riders are validated too, because carrying them is
+      // what can push one off the end of the wall or onto a neighbour.
+      await commitWallObjectEdit(
+        "Edit shelf",
+        project,
+        nextWallObjects,
+        [wallObjectId, ...riderIds],
+        true
+      );
+    },
+
     async commitPlanMove(objectId, placement, allowOverlap = false) {
       const project = get().project;
       if (!project) return;
@@ -1343,6 +1546,9 @@ export function createPlacementSlice(
         () => nextProject,
         selectionWrite(project, NO_SELECTION, get().wallContextId)
       );
+      // Same notice as removePlacement — this is the keyboard Delete path, and
+      // a shelf removed here leaves its works behind exactly the same way.
+      noticeRemovedShelfRiders(project, removedIds);
     },
   };
 

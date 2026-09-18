@@ -3,7 +3,9 @@ import type { FloorWall } from "../geometry/planObjects";
 import {
   getPlanGroupCenterMm,
   resolvePlanGroupMemberMove,
+  resolvePlanGroupMove,
   resolvePlanGroupReanchorWall,
+  resolvePlanObjectNudge,
   type PlanGroupMember
 } from "./planGroupMove";
 
@@ -277,5 +279,226 @@ describe("resolvePlanGroupReanchorWall", () => {
     });
 
     expect(result?.id).toBe("wall-2");
+  });
+});
+
+// ── Rigid shelf assemblies ─────────────────────────────────────────────────
+// A shelf plus the works standing on it is ONE body (USER DECISION). These pin
+// the two things that make it one: the rider offsets never change, and the
+// clamp is applied ONCE to the union instead of per member.
+
+const SHORT_WALL = makeWall("wall-short", { xMm: 0, yMm: 2000 }, { xMm: 1000, yMm: 2000 });
+const OPEN_WALL: FloorWall = {
+  ...makeWall("wall-open", { xMm: 0, yMm: 3000 }, { xMm: 8000, yMm: 3000 }),
+  isOpenSide: true
+};
+
+// A 1200-wide shelf centred at x=2000 carrying two 300-wide works at ±400.
+function shelfAssembly(
+  wall: FloorWall = HORIZONTAL_WALL,
+  shelfXMm = 2000
+): PlanGroupMember[] {
+  const at = (xAlongMm: number) => ({
+    xMm: wall.startFloorMm.xMm + xAlongMm,
+    yMm: wall.startFloorMm.yMm
+  });
+  return [
+    {
+      id: "shelf",
+      anchor: "wall",
+      kind: "shelf",
+      wall,
+      worldCenterMm: at(shelfXMm),
+      widthMm: 1200,
+      depthMm: 300
+    },
+    {
+      id: "rider-left",
+      anchor: "wall",
+      kind: "artwork",
+      ridesShelfId: "shelf",
+      wall,
+      worldCenterMm: at(shelfXMm - 400),
+      widthMm: 300,
+      depthMm: 100
+    },
+    {
+      id: "rider-right",
+      anchor: "wall",
+      kind: "artwork",
+      ridesShelfId: "shelf",
+      wall,
+      worldCenterMm: at(shelfXMm + 400),
+      widthMm: 300,
+      depthMm: 100
+    }
+  ];
+}
+
+function offsetsFrom(moves: { id: string; commit: { xMm: number } }[]): number[] {
+  const shelfXMm = moves.find((move) => move.id === "shelf")?.commit.xMm ?? NaN;
+  return moves
+    .filter((move) => move.id !== "shelf")
+    .map((move) => move.commit.xMm - shelfXMm);
+}
+
+describe("resolvePlanGroupMove — shelf assemblies", () => {
+  it("carries riders rigidly on an ordinary slide", () => {
+    const { moves, refusedShelfIds } = resolvePlanGroupMove(shelfAssembly(), {
+      xMm: 500,
+      yMm: 0
+    });
+
+    expect(refusedShelfIds).toEqual([]);
+    expect(moves.map((move) => move.commit.xMm)).toEqual([2500, 2100, 2900]);
+    expect(offsetsFrom(moves)).toEqual([-400, 400]);
+    // Same-wall slide ⇒ a pure x update, exactly as before shelves existed.
+    for (const move of moves) expect(move.commit.wallId).toBeUndefined();
+  });
+
+  it("keeps rider offsets byte-identical at BOTH wall ends", () => {
+    // Union spans shelf ±600 (the slab is the widest member), so the assembly
+    // must come to rest with its union edge on the wall end, never squashed.
+    const atStart = resolvePlanGroupMove(shelfAssembly(), { xMm: -9000, yMm: 0 });
+    expect(offsetsFrom(atStart.moves)).toEqual([-400, 400]);
+    expect(atStart.moves[0].commit.xMm).toBe(600);
+
+    const atEnd = resolvePlanGroupMove(shelfAssembly(), { xMm: 9000, yMm: 0 });
+    expect(offsetsFrom(atEnd.moves)).toEqual([-400, 400]);
+    expect(atEnd.moves[0].commit.xMm).toBe(HORIZONTAL_WALL.lengthMm - 600);
+
+    // Per-member clamping is what this replaces: clamped alone, the riders
+    // would pile up on the wall end and the spacing would collapse.
+    const perMember = shelfAssembly().map(
+      (member) => resolvePlanGroupMemberMove(member, { xMm: 9000, yMm: 0 }).commit.xMm
+    );
+    expect(perMember).toEqual([4000, 4000, 4000]);
+  });
+
+  it("re-anchors the whole assembly onto a foreign wall with one common delta", () => {
+    const { moves, refusedShelfIds } = resolvePlanGroupMove(
+      shelfAssembly(),
+      { xMm: 0, yMm: 900 },
+      FAR_WALL
+    );
+
+    expect(refusedShelfIds).toEqual([]);
+    expect(moves.map((move) => move.commit)).toEqual([
+      { id: "shelf", xMm: 2000, wallId: "wall-2" },
+      { id: "rider-left", xMm: 1600, wallId: "wall-2" },
+      { id: "rider-right", xMm: 2400, wallId: "wall-2" }
+    ]);
+    // Every preview rect landed on the target wall's line.
+    for (const move of moves) expect(move.rect.centerYMm).toBeCloseTo(1000);
+  });
+
+  it("clamps one common delta when the target wall is SHORTER than the source", () => {
+    // Narrow enough to fit SHORT_WALL: a 600 shelf with 100-wide riders at
+    // ±400 gives a union of 600..-300..+450 → 900mm on a 1000mm wall.
+    const narrow = shelfAssembly().map((member) =>
+      member.id === "shelf"
+        ? { ...member, widthMm: 600 }
+        : { ...member, widthMm: 100 }
+    );
+    const { moves, refusedShelfIds } = resolvePlanGroupMove(
+      narrow,
+      { xMm: 0, yMm: 2000 },
+      SHORT_WALL
+    );
+
+    expect(refusedShelfIds).toEqual([]);
+    // The projected shelf centre would be 2000 on a 1000-long wall; the
+    // union's right edge (shelf + 450) pins it at 550, riders following.
+    expect(moves[0].commit).toEqual({ id: "shelf", xMm: 550, wallId: "wall-short" });
+    expect(offsetsFrom(moves)).toEqual([-400, 400]);
+  });
+
+  it("REFUSES a target wall the union cannot fit, leaving the assembly on its own wall", () => {
+    const { moves, refusedShelfIds } = resolvePlanGroupMove(
+      shelfAssembly(),
+      { xMm: 0, yMm: 2000 },
+      SHORT_WALL
+    );
+
+    expect(refusedShelfIds).toEqual(["shelf"]);
+    for (const move of moves) {
+      expect(move.commit.wallId).toBeUndefined();
+      expect(move.rect.centerYMm).toBeCloseTo(0);
+    }
+    // Still rigid, still on wall-1: only the along-wall slide took effect.
+    expect(offsetsFrom(moves)).toEqual([-400, 400]);
+  });
+
+  it("REFUSES an open wall, which has no surface to stand on", () => {
+    const { moves, refusedShelfIds } = resolvePlanGroupMove(
+      shelfAssembly(),
+      { xMm: 0, yMm: 3000 },
+      OPEN_WALL
+    );
+
+    expect(refusedShelfIds).toEqual(["shelf"]);
+    for (const move of moves) expect(move.commit.wallId).toBeUndefined();
+  });
+
+  it("re-anchors a lone shelf (an assembly of one) and never a door or a case", () => {
+    const [shelf] = shelfAssembly();
+    const door: PlanGroupMember = {
+      id: "door", anchor: "wall", kind: "door", wall: HORIZONTAL_WALL,
+      worldCenterMm: { xMm: 1000, yMm: 0 }, widthMm: 900, depthMm: 150
+    };
+    const wallCase: PlanGroupMember = {
+      id: "case", anchor: "wall", kind: "case", wall: HORIZONTAL_WALL,
+      worldCenterMm: { xMm: 3000, yMm: 0 }, widthMm: 500, depthMm: 450
+    };
+
+    const { moves } = resolvePlanGroupMove([shelf, door, wallCase], { xMm: 0, yMm: 900 }, FAR_WALL);
+
+    expect(moves[0].commit.wallId).toBe("wall-2");
+    expect(moves[1].commit.wallId).toBeUndefined();
+    expect(moves[2].commit.wallId).toBeUndefined();
+  });
+
+  it("treats a declared rider whose shelf is not in the set as an ordinary member", () => {
+    const [, riderLeft] = shelfAssembly();
+    const { moves, refusedShelfIds } = resolvePlanGroupMove([riderLeft], { xMm: 9000, yMm: 0 });
+
+    expect(refusedShelfIds).toEqual([]);
+    // Clamped on its own, exactly like any lone artwork: centre pinned to the
+    // wall end rather than held half a shelf-width inside it.
+    expect(moves[0].commit.xMm).toBeCloseTo(4000);
+  });
+
+  it("gives preview rects and commits from ONE pass", () => {
+    const { moves } = resolvePlanGroupMove(shelfAssembly(), { xMm: 250, yMm: 0 });
+    for (const move of moves) {
+      expect(move.rect.centerXMm).toBeCloseTo(move.commit.xMm);
+    }
+  });
+});
+
+describe("resolvePlanObjectNudge with a shelf in the selection", () => {
+  it("nudges the assembly rigidly, in one group commit", () => {
+    const nudge = resolvePlanObjectNudge(shelfAssembly(), { xMm: 10, yMm: 0 });
+
+    expect(nudge?.kind).toBe("group");
+    const moves = nudge?.kind === "group" ? nudge.moves : [];
+    expect(moves.map((move) => move.id)).toEqual(["shelf", "rider-left", "rider-right"]);
+    expect(moves[0].xMm).toBeCloseTo(2010);
+    expect(moves[1].xMm).toBeCloseTo(1610);
+    expect(moves[2].xMm).toBeCloseTo(2410);
+    // No wall change and no floor y on a wall member.
+    for (const move of moves) expect(move.yMm).toBeUndefined();
+  });
+
+  it("holds the offsets when the nudge runs the assembly into the wall end", () => {
+    const nudge = resolvePlanObjectNudge(shelfAssembly(HORIZONTAL_WALL, 3350), {
+      xMm: 100,
+      yMm: 0
+    });
+
+    const moves = nudge?.kind === "group" ? nudge.moves : [];
+    // The union's right edge stops at the 4000 wall end (shelf at 3400), and
+    // the riders keep their ±400 offsets rather than piling up behind it.
+    expect(moves.map((move) => move.xMm)).toEqual([3400, 3000, 3800]);
   });
 });

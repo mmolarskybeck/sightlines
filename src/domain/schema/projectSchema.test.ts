@@ -4,7 +4,8 @@ import {
   type ArtworkFloorObject,
   type ArtworkWallObject,
   type FloorSupport,
-  type OpeningWallObject
+  type OpeningWallObject,
+  type ShelfWallObject
 } from "../project";
 import { createSampleProject } from "../sample/sampleProject";
 import { feetToMm, inchesToMm } from "../units/length";
@@ -682,6 +683,50 @@ describe("migrateProject", () => {
     expect(() =>
       migrateProject({ ...sample, schemaVersion: CURRENT_SCHEMA_VERSION + 1 })
     ).toThrow(/newer version of Sightlines/);
+  });
+
+  it("migrates a v6 document to v7 untouched and refuses a document from a newer build", () => {
+    const sample = createSampleProject();
+    const v6Document = { ...sample, schemaVersion: 6 };
+
+    const migrated = migrateProject(v6Document);
+
+    // v6→v7 adds wall shelves; a v6 project carries none, so the chain's only
+    // edit is the version stamp itself.
+    expect(migrated.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    expect(migrated).toEqual({ ...sample, schemaVersion: CURRENT_SCHEMA_VERSION });
+
+    // The bump exists for THIS direction: a v6 build would accept the file,
+    // STRIP every shelf, and re-save the works that stood on them floating in
+    // mid-air — a silently wrong picture of the document.
+    expect(() =>
+      migrateProject({ ...sample, schemaVersion: CURRENT_SCHEMA_VERSION + 1 })
+    ).toThrow(/newer version of Sightlines/);
+  });
+
+  it("round-trips a shelf and refuses one with no depth", () => {
+    const project = createSampleProject();
+    const shelf: ShelfWallObject = {
+      id: "shelf-1",
+      kind: "shelf",
+      wallId: project.floor.rooms[0].room.walls[0].id,
+      xMm: 1500,
+      yMm: 1180,
+      widthMm: 1200,
+      heightMm: 40,
+      depthMm: 300
+    };
+    project.wallObjects = [shelf];
+
+    const parsed = parseProject(JSON.parse(JSON.stringify(project)));
+    expect(parsed.wallObjects[0]).toEqual(shelf);
+
+    // depthMm is REQUIRED — that is exactly why the shelf rode a version bump
+    // instead of landing as a purely additive union member.
+    const { depthMm: _dropped, ...withoutDepth } = shelf;
+    const missingDepth = createSampleProject();
+    missingDepth.wallObjects = [withoutDepth as unknown as ShelfWallObject];
+    expect(() => parseProject(missingDepth)).toThrow();
   });
 
   it("round-trips a floor support, absence included, and strips unknown keys", () => {

@@ -6,6 +6,7 @@ import type {
   CaseFloorObject,
   CaseWallObject,
   ConnectableOpeningWallObject,
+  ShelfWallObject,
   WallObject
 } from "../project";
 import { MONITOR_DEPTH_MM, MONITOR_PEDESTAL_HEIGHT_MM } from "../geometry/monitorGlyphs";
@@ -188,6 +189,42 @@ describe("buildElevationScene", () => {
     expect(scene.cases[0]!.sizeMm).toEqual({ widthMm: 1500, heightMm: 180 });
     // Not misfiled as an opening.
     expect(scene.openings).toHaveLength(0);
+  });
+
+  it("emits a wall shelf as a slab band spanning its ends at its stored centre height", () => {
+    const shelf: ShelfWallObject = {
+      id: "wo-shelf",
+      kind: "shelf",
+      wallId: "wall-north",
+      xMm: 2000,
+      yMm: 1180,
+      widthMm: 1200,
+      heightMm: 40,
+      depthMm: 300
+    };
+
+    const scene = buildElevationScene([shelf], WALL);
+
+    expect(scene.shelves).toEqual([
+      {
+        objectId: "wo-shelf",
+        xMinMm: 1400,
+        xMaxMm: 2600,
+        // yMm is the slab CENTRE, heightMm its thickness — the band runs
+        // 1160..1200, and 1200 is the face a work stands on.
+        yMm: 1180,
+        heightMm: 40,
+        depthMm: 300
+      }
+    ]);
+    // Its own bucket: never an opening, a case or a wall text.
+    expect(scene.openings).toHaveLength(0);
+    expect(scene.cases).toHaveLength(0);
+    expect(scene.wallTexts).toHaveLength(0);
+  });
+
+  it("emits no shelf entries for a wall that has none", () => {
+    expect(buildElevationScene([placement()], WALL).shelves).toEqual([]);
   });
 });
 

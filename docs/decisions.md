@@ -16,6 +16,10 @@ Decisions of record, invariants, and traps distilled from the 2026-07-09 → 202
 - **2026-08-10** Partitions within `PARTITION_NEIGHBOR_MAX_GAP_MM` (1200, inclusive) count as spacing neighbors for readouts, snapping, arrange, PDF dims, and the plan wall-dimension chain, which splits at a qualifying band instead of measuring through it.
 - **2026-08-10** Drag barriers past a partition stay off — placement past a partition is visual-only — USER DECISION.
 - **2026-09-17** Use as North wall relabels all four walls in stored loop order; any 4-wall room; partition faces excluded; confirms before overwriting custom names, judged on the whole ordered name pattern (hasDefaultWallNames), never name by name — a typed "Wall 12" or a duplicated compass name is custom.
+- **2026-09-18** A shelf is its own wall object, not a placement variant: several works share one slab, so the thing they stand on has to exist independently of any of them — USER DECISION. `yMm` is the slab centre, `heightMm` its thickness, `depthMm` its protrusion; the inspector authors the TOP face and converts once, at the commit.
+- **2026-09-18** Shelf riders are DERIVED from geometry at move time on every path — elevation drag and nudge, plan drag and nudge, inspector x/top edits — and never stored; `shelfRiders.ts` is the whole definition and `WallObjectBase.groupId` stays dead data. Never build shelf grouping on `groupId` — USER DECISION. **Amended 2026-09-18 (later):** the foot is the FRAMED outer footprint bottom (`withArtworkFootprintFromMap`), never the stored image bottom — the elevation snap and barriers seat the outer box on the slab, so the rider test, "Add shelf", plan/3D seating and `placeArtwork`'s re-seat all measure the same edge; every `getShelfRiders`/`expandWithShelfRiders` call passes an `artworksById` map.
+- **2026-09-18** A shelf reanchors across walls in plan the way artwork does, but RIGIDLY: one common delta for the slab and its riders, refused outright when the union does not fit the target wall (or it is an open side). Never fall back to per-member clamping — USER DECISION.
+- **2026-09-18** Deleting a shelf leaves the works that stood on it exactly where they are and says so ("Shelf removed; N works left in place.") — no confirm dialog, because nothing is lost. The notice goes through the sonner channel `reportSupportRepairs` uses, not the `error` banner.
 
 ## Placement, snapping and framing
 
@@ -38,6 +42,11 @@ Decisions of record, invariants, and traps distilled from the 2026-07-09 → 202
 - **2026-08-31** A work with a mat or frame set stays "framed" regardless of medium, so medium-derived defaults can never silently strip an existing frame.
 - **2026-08-31** Floor placements rebake on record-dimension edits only while undiverged (±0.5 mm vs seeded size); a manually resized placement is left alone, and the rebake composes with the wall rebake into one undo entry.
 - **2026-09-01** `artworkDropOuterMm` in `domain/framing.ts` is the one drop-ghost footprint; 3D and elevation ghosts must match the plan drop.
+- **2026-09-18** Snap tier `shelf-top` (rank 0.5) outranks the centerline (1) — USER DECISION. It is only ever offered for a work that already overlaps the slab horizontally (`getShelfSnapCandidates`, the same predicate that decides what a shelf carries), so once the work is also in capture range the physical support relationship beats the curatorial eyeline.
+
+- **2026-09-18** Seating a work on a shelf is one gesture in every view — drop or drag it over the slab — and the slab announces capture in the selection petrol everywhere (elevation `.snap-target`, plan `.is-snap-target`, 3D outline). The elevation shelf-top guide carries `guidePositionMm` (the top face) and `extentMm` (the slab span) and an "On shelf" label, so it can never be mistaken for the centerline guide; the elevation guide renderer honors `extentMm` on both axes.
+- **2026-09-18** A plan checklist drop over a shelf's footprint seats on it (`seatOnAnyOverlappingShelf`, widest x-overlap wins); a plan MOVE of a placed wall work stays x-only and never re-seats — USER-FACING RULE, do not "fix". ⌘/Ctrl bypasses seating on every drop and drag path, as it already bypassed every other snap.
+- **2026-09-18** `placeArtwork` takes `opts.seatOnShelfId` and re-seats the bottom edge on that slab AFTER `loadArtworkAspect` bakes the real size: a drop ghost may have been placeholder-sized, and a work whose bottom misses the top face by half a height difference is not a rider.
 
 ## Floor objects and display types
 
@@ -82,10 +91,11 @@ Decisions of record, invariants, and traps distilled from the 2026-07-09 → 202
 - **2026-08-11** 3D drop mapping filters intersections rather than taking `[0]`, so a hit on an artwork plane or pick band falls through to the wall or floor behind it.
 - **2026-08-11** In 3D the arrow-nudge listener is window capture-phase and must `preventDefault()` + `stopImmediatePropagation()` so `KeyboardTravel` never sees a handled arrow; WASD always travels and multi-select bails to travel.
 - **2026-08-11** Anything drawn in 3D selects its own object; open doorways use a 60 mm perimeter pick band because a full pick plane was rejected — the centre stays see-through and click-through — USER DECISION.
-- **2026-08-11** 3D is a placement and nudge surface; elevation and the inspector remain the precision surfaces, and there is no snapping in 3D.
+- **2026-08-11** 3D is a placement and nudge surface; elevation and the inspector remain the precision surfaces, and there is no snapping in 3D. **Amended 2026-09-18:** the one exception is shelf seating — a wall work dropped or dragged within `SHELF_SEAT_CAPTURE_3D_MM` (200 mm) of a slab it overlaps stands on it, ⌘/Ctrl bypasses it, and the slab shows the selection outline while captured.
 - **2026-08-28** `CLICK_DRAG_TOLERANCE_PX = 6` is the one discriminator between click, orbit-release and drag everywhere in 3D; an object drag disables OrbitControls for the gesture and commits as one store call = one undo.
 - **2026-08-28** Deferred in 3D drag: wall↔floor conversion mid-drag, group drag, touch drag, and snapping or barriers.
 - **2026-08-31** Known disagreement: elevation wires end at the viewed wall's top while 3D wires go to room height.
+- **2026-09-18** A shelf is selectable in 3D but NOT draggable this round — `WallShelfMesh` deliberately has no drag handler, so a 3D drag cannot move a slab out from under its riders. Rider-aware 3D shelf drag is a tracked follow-up.
 
 ## Exports (PNG, PDF, checklist, packages)
 
@@ -169,6 +179,8 @@ Decisions of record, invariants, and traps distilled from the 2026-07-09 → 202
 - **2026-09-01** `--dialog-width` on `.dialog-content` and `.seg-compact`/`.seg-compact--lg` are the single declarations; do not re-add per-component overrides.
 - **2026-08-19** User-facing copy says "project", never "document" — "document" is internal vocabulary a curator reads as a file.
 - **2026-08-19** A copy layer belongs in `src/app/`, not `src/domain/`; check with `grep -rn 'from "../../app/' src/domain/` (should be empty).
+
+- **2026-09-18** The wall-work inspector shows the support relationship as a "Support" summary row ("Hung on the wall" with an Add shelf action, or "Shelf" with Select shelf), derived from `getShelfRiders` on every render — never a stored flag and never a two-way select, because leaving a shelf is a drag, not a menu choice. The shelf inspector is state-aware: a teaching notice at zero riders, "Holds N works" with Select works otherwise.
 
 ## Working method (verification and review)
 

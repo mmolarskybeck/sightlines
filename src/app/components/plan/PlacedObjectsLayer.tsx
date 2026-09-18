@@ -22,6 +22,7 @@ import {
   ArtworkTooltipContent,
   CaseTooltipContent,
   OpeningTooltipContent,
+  ShelfTooltipContent,
   WallTextTooltipContent
 } from "../shared/PlacementTooltip";
 import { WALL_TEXT_DEFAULT_NAME } from "../../../domain/placement/createWallText";
@@ -104,6 +105,10 @@ export type PlacedObjectsLayerProps = {
   selectedArtworkId?: string | null;
   selectedOpeningId?: string | null;
   selectedObjectIds: string[];
+  // The wall object a gesture in flight would seat its object ON — today the
+  // shelf a checklist drop is captured over (DropGhostState.shelfId). Null at
+  // rest. Only the wall-object pass reads it; shelves are wall objects.
+  snapTargetObjectId?: string | null;
   consumeSelectSuppression: () => boolean;
   beginObjectDrag: (params: BeginObjectDragParams, event: ReactPointerEvent<SVGGElement>) => void;
   onSelectObject?: (id: string, options: { additive: boolean }) => void;
@@ -127,6 +132,7 @@ export function PlacedObjectsLayer({
   selectedArtworkId,
   selectedOpeningId,
   selectedObjectIds,
+  snapTargetObjectId,
   consumeSelectSuppression,
   beginObjectDrag,
   onSelectObject,
@@ -247,6 +253,7 @@ export function PlacedObjectsLayer({
             isFloorPlaced={isFloorPlaced}
             isInvalid={isInvalid}
             isSelected={isSelected}
+            isSnapTarget={wallObject.id === snapTargetObjectId}
             key={wallObject.id}
             kind={wallObject.kind}
             pixelsPerMm={pixelsPerMm}
@@ -270,6 +277,15 @@ export function PlacedObjectsLayer({
               ) : wallObject.kind === "case" ? (
                 <CaseTooltipContent
                   secondaryMm={wallObject.heightMm}
+                  unit={unit}
+                  widthMm={wallObject.widthMm}
+                />
+              ) : wallObject.kind === "shelf" ? (
+                // Width × protrusion, not width × thickness: in PLAN the second
+                // axis of the footprint under the pointer is the depth, the
+                // same convention the opening/case bodies follow.
+                <ShelfTooltipContent
+                  depthMm={wallObject.depthMm}
                   unit={unit}
                   widthMm={wallObject.widthMm}
                 />
@@ -303,7 +319,7 @@ export function PlacedObjectsLayer({
                     // exact source order (override, record, default) — preview
                     // and commit must agree on the same number.
                     depthMm:
-                      wallObject.kind === "case"
+                      wallObject.kind === "case" || wallObject.kind === "shelf"
                         ? wallObject.depthMm
                         : wallObject.kind === "artwork"
                           ? (effectiveWallArtworkDepthMm(wallObject, artwork) ??

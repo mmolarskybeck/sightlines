@@ -1,6 +1,7 @@
 import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
 import { DoorIcon } from "@phosphor-icons/react/dist/csr/Door";
 import { RectangleDashedIcon } from "@phosphor-icons/react/dist/csr/RectangleDashed";
+import { RowsIcon } from "@phosphor-icons/react/dist/csr/Rows";
 import { SquareIcon } from "@phosphor-icons/react/dist/csr/Square";
 import { TextAlignLeftIcon } from "@phosphor-icons/react/dist/csr/TextAlignLeft";
 import type { Icon } from "@phosphor-icons/react";
@@ -111,6 +112,33 @@ export function CaseTooltipContent({
         Display case
       </span>
       <span className="placement-tooltip-dims">{formatDims(widthMm, secondaryMm, displayUnit)}</span>
+    </div>
+  );
+}
+
+// A wall shelf's hover body: its width and the DEPTH it protrudes — the two
+// numbers that say whether a work will fit on it, which is the only question a
+// hover over a shelf is asking. (Its thickness is the third stored number and
+// deliberately not here; a slab's thickness is an inspector detail.) Reuses the
+// compact opening/case layout and the same opening-size unit scope.
+export function ShelfTooltipContent({
+  widthMm,
+  depthMm,
+  unit
+}: {
+  widthMm: number;
+  depthMm: number;
+  unit: DisplayUnit;
+}) {
+  const { displayUnit } = getScopeUnits(unitSystemFromDisplayUnit(unit), "openingSize");
+
+  return (
+    <div className="placement-tooltip-opening">
+      <span className="placement-tooltip-heading">
+        <RowsIcon aria-hidden="true" size={15} />
+        Shelf
+      </span>
+      <span className="placement-tooltip-dims">{formatDims(widthMm, depthMm, displayUnit)}</span>
     </div>
   );
 }

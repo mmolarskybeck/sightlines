@@ -16,6 +16,7 @@ export function PartitionSlab({
   texturesByAssetId,
   artworksById,
   selectedObjectIds,
+  shelfSnapTargetId,
   selectedArtworkId,
   selectedWallId,
   onSelectWall,
@@ -26,6 +27,8 @@ export function PartitionSlab({
   texturesByAssetId: ReadonlyMap<string, Texture>;
   artworksById: ReadonlyMap<string, Artwork>;
   selectedObjectIds: string[];
+  // Pass-through to the face panels; see SceneRooms.
+  shelfSnapTargetId?: string | null;
   selectedArtworkId: string | null;
   selectedWallId: string | null;
   onSelectWall: (wallId: string) => void;
@@ -60,6 +63,7 @@ export function PartitionSlab({
           artworksById={artworksById}
           isSelected={face.wallId === selectedWallId}
           selectedObjectIds={selectedObjectIds}
+          shelfSnapTargetId={shelfSnapTargetId}
           selectedArtworkId={selectedArtworkId}
           onSelectWall={onSelectWall}
           onSelectObject={onSelectObject}

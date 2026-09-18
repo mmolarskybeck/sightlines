@@ -177,12 +177,21 @@ const caseWallObjectSchema = wallObjectBaseSchema.extend({
   depthMm: z.number().positive()
 });
 
+// A wall shelf: like the case above, a new union member that adds a REQUIRED
+// `depthMm` (protrusion from the wall). Not purely additive, so it rides the
+// v6→v7 schema-version bump (see MIGRATIONS).
+const shelfWallObjectSchema = wallObjectBaseSchema.extend({
+  kind: z.literal("shelf"),
+  depthMm: z.number().positive()
+});
+
 const wallObjectSchema = z.discriminatedUnion("kind", [
   artworkWallObjectSchema,
   ...connectableOpeningWallObjectSchemas,
   blockedZoneWallObjectSchema,
   wallTextWallObjectSchema,
-  caseWallObjectSchema
+  caseWallObjectSchema,
+  shelfWallObjectSchema
 ]);
 
 const floorObjectBaseSchema = z.object({
@@ -619,7 +628,13 @@ const MIGRATIONS: Record<number, (doc: Doc) => Doc> = {
   // the file, STRIP `support`, draw the sculpture flat on the floor and re-save
   // that loss — a silently wrong picture of the document, not merely a missing
   // convenience.
-  5: (doc) => ({ ...doc, schemaVersion: 6 })
+  5: (doc) => ({ ...doc, schemaVersion: 6 }),
+  // v7 adds wall shelves (ShelfWallObject). A v6 project has none, so this is a
+  // pure version stamp like v1->v2, v3->v4, v4->v5 and v5->v6. The bump exists
+  // for the DOWNGRADE direction, the same rationale as isOpenSide and support
+  // above: a v6 build would accept the file, STRIP every shelf, leave the works
+  // that stood on them floating in mid-air and re-save that loss.
+  6: (doc) => ({ ...doc, schemaVersion: 7 })
 };
 
 function migrateV2ToV3(doc: Doc): Doc {

@@ -5512,6 +5512,18 @@ body.panels-resizing * {
   pointer-events: none;
 }
 
+/* A word on the guide, for the one snap whose line alone is ambiguous: a
+   shelf-top capture. Same halo treatment as .resize-handle-label so it stays
+   legible over a slab, a work, or the wall. */
+.snap-guide-label {
+  fill: var(--primary-strong);
+  font-weight: var(--weight-strong);
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 3;
+  pointer-events: none;
+}
+
 /* Draw-mode room snapping (§6.3): the cursor is latched onto an existing
    room's perimeter. A filled petrol square (vs the hollow .resize-handle
    vertices) marks the exact snapped point — same square language, no pills or
@@ -6549,9 +6561,13 @@ body.panels-resizing * {
   font-size: var(--type-sm);
 }
 
-/* Read-only values use --muted because --subtle misses AA at this size. */
+/* Read-only values use --muted because --subtle misses AA at this size.
+   flex-wrap is the Support row's escape valve: label + value + a short
+   action (e.g. "Add shelf") usually fit one line, but a longer pairing wraps
+   the action onto its own line rather than truncating the value. */
 .inspector-summary-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-8);
   min-height: 28px;
@@ -6577,6 +6593,9 @@ body.panels-resizing * {
 
 .inspector-summary-row-action {
   flex: 0 0 auto;
+  /* When the row wraps, the action drops to its own line flush with the
+     value's right edge instead of hugging the label's left edge. */
+  margin-inline-start: auto;
 }
 
 /* Notice tone pairings maintain WCAG AA contrast. */
@@ -8120,6 +8139,66 @@ body.panels-resizing * {
   stroke: var(--selection);
 }
 
+/* Wall shelf in elevation (ElevationShelf.tsx) — one solid slab band, the same
+   grab/selection grammar as .elevation-case beside it. The slab is FILLED
+   rather than outlined: a shelf head-on has no construction to draw, and what
+   the drawing has to say is that there is a surface there for a work to stand
+   on. A thin slab is easy to miss at zoom, so the fill (not just the stroke)
+   carries the hit target. */
+.elevation-shelf {
+  cursor: grab;
+  touch-action: none;
+}
+
+.elevation-shelf:active {
+  cursor: grabbing;
+}
+
+.shelf-slab {
+  fill: var(--surface-strong);
+  fill-opacity: 1;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  /* Same reasoning as .case-outline: the whole band is the drag/click target
+     rather than only its hairline stroke. */
+  pointer-events: all;
+}
+
+.elevation-shelf.ghost {
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+.elevation-shelf.ghost .shelf-slab {
+  pointer-events: none;
+  fill: var(--primary-soft);
+  fill-opacity: 0.4;
+  stroke: var(--selection);
+  stroke-dasharray: 6 5;
+}
+
+.elevation-shelf.out-of-bounds .shelf-slab {
+  stroke: var(--danger);
+  stroke-dasharray: 4 4;
+  stroke-width: 2;
+}
+
+.elevation-shelf.selected .shelf-slab {
+  stroke: var(--selection);
+  stroke-width: 2.5;
+}
+
+/* A work is captured on this slab right now (the shelf-top snap owns the y
+   axis). The surface announces itself in the same petrol the canvas uses for
+   selection, so the relationship reads on the SHELF rather than only as a
+   dashed line near it. */
+.elevation-shelf.snap-target .shelf-slab {
+  fill: var(--primary-soft);
+  stroke: var(--selection);
+  stroke-width: 2.5;
+}
+
 /* The elevation shadow of a freestanding floor case: a low-opacity dashed
    silhouette standing in front of the wall, non-interactive, painted behind
    the wall objects purely as an alignment aid. Now a <g> (glass box + base
@@ -8304,6 +8383,7 @@ body.panels-resizing * {
    the case's glass top, so from above the artwork covers the case), and BOTH
    fills are opaque so neither ever reads as visible "through" the other. */
 .plan-object--case .plan-object-outline,
+.plan-object--shelf .plan-object-outline,
 .plan-object--artwork .plan-object-outline {
   fill-opacity: 1;
 }
@@ -8344,6 +8424,35 @@ body.panels-resizing * {
 
 .plan-object-mark--blocked-zone {
   opacity: 0.75;
+}
+
+/* Wall shelf: one filled slab, no construction lines. It carries a fill rather
+   than a stroke because a shelf is opaque timber seen from above — the same
+   "solid, not hollow" reading the paint order depends on (planScenePaintOrder
+   paints shelves with the cases, under the works standing on them). Stroke is
+   cleared so the group's .plan-object-mark stroke doesn't double the outline
+   already drawn beneath it. */
+.plan-object-shelf {
+  fill: var(--surface-strong);
+  fill-opacity: 0.92;
+  stroke: none;
+  pointer-events: none;
+}
+
+.plan-object.is-selected .plan-object-shelf {
+  fill: var(--selection);
+  fill-opacity: 0.22;
+}
+
+/* A work being dropped is captured over this slab: the shelf announces itself
+   as a surface, in the same petrol vocabulary the elevation's shelf-top guide
+   uses, so "it will land on the shelf" reads in plan too. Stroked as well as
+   washed — the resting glyph has no stroke at all, so the outline is what
+   separates "captured" from "merely selected". */
+.plan-object.is-snap-target .plan-object-shelf {
+  fill: var(--primary-soft);
+  stroke: var(--selection);
+  stroke-width: 2;
 }
 
 /* Front face of a floor-placed artwork (the +depth long edge — see the

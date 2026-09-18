@@ -342,3 +342,132 @@ describe("resolveArtworkSnap", () => {
     });
   });
 });
+
+// ── Shelf-top targets ──────────────────────────────────────────────────────
+// The caller pre-filters `shelves` to same-wall shelves the moving work
+// overlaps horizontally (getShelfSnapCandidates); these tests take that as
+// given and pin what the target itself is worth once it is offered.
+
+describe("shelf-top snapping", () => {
+  // Slab centred at 1180 with 40mm thickness: its top face is at 1200. Its
+  // x-span (1200 wide, centred at 1000) runs 400..1600 and bounds the guide.
+  const SHELF = { id: "shelf-1", yMm: 1180, heightMm: 40, xMm: 1000, widthMm: 1200 };
+
+  const baseArgs = {
+    centerlineYMm: 1450,
+    wallLengthMm: 4000,
+    wallHeightMm: 3000,
+    gridIntervalMm: 100,
+    neighbors: [] as ArtworkWallObject[],
+    movingSize: { widthMm: 300, heightMm: 400 },
+    thresholdMm: 20
+  };
+
+  it("emits one y target per supplied shelf, standing the work's BOTTOM on the top face", () => {
+    const targets = getArtworkSnapTargets({
+      centerlineYMm: 1450,
+      wallLengthMm: 4000,
+      wallHeightMm: 3000,
+      gridIntervalMm: 0,
+      neighbors: [],
+      movingSize: { widthMm: 300, heightMm: 400 },
+      shelves: [SHELF, { id: "shelf-2", yMm: 1980, heightMm: 40, xMm: 3000, widthMm: 800 }]
+    });
+
+    const shelfTargets = targets.filter((target) => target.kind === "shelf-top");
+    expect(shelfTargets).toEqual([
+      {
+        id: "shelf-top:shelf-1",
+        kind: "shelf-top",
+        axis: "y",
+        point: { xMm: 0, yMm: 1400 },
+        // Drawn on the TOP FACE, not through the work's centre...
+        guidePositionMm: 1200,
+        // ...and only as long as the slab itself.
+        extentMm: { startMm: 400, endMm: 1600 }
+      },
+      {
+        id: "shelf-top:shelf-2",
+        kind: "shelf-top",
+        axis: "y",
+        point: { xMm: 0, yMm: 2200 },
+        guidePositionMm: 2000,
+        extentMm: { startMm: 2600, endMm: 3400 }
+      }
+    ]);
+  });
+
+  it("hands the winning guide the slab's top face and span, not the snapped centre", () => {
+    const result = resolveArtworkSnap(
+      { xMm: 555, yMm: 1420 },
+      { ...baseArgs, shelves: [SHELF], snapToGrid: false }
+    );
+    const guide = result.activeGuides.find((candidate) => candidate.axis === "y");
+    expect(guide?.targetId).toBe("shelf-top:shelf-1");
+    // The work's centre lands at 1400; the guide sits 200mm lower, on the face.
+    expect(guide?.positionMm).toBe(1200);
+    expect(guide?.extentMm).toEqual({ startMm: 400, endMm: 1600 });
+  });
+
+  it("emits none when no shelves are supplied", () => {
+    const targets = getArtworkSnapTargets({
+      centerlineYMm: 1450,
+      wallLengthMm: 4000,
+      wallHeightMm: 3000,
+      gridIntervalMm: 0,
+      neighbors: [],
+      movingSize: { widthMm: 300, heightMm: 400 }
+    });
+    expect(targets.filter((target) => target.kind === "shelf-top")).toEqual([]);
+  });
+
+  it("captures a work onto the shelf top", () => {
+    // Candidate centre for a 400-tall work standing on a 1200 top face: 1400.
+    const result = resolveArtworkSnap(
+      { xMm: 555, yMm: 1420 },
+      { ...baseArgs, shelves: [SHELF], snapToGrid: false }
+    );
+    expect(result.point.yMm).toBe(1400);
+    // Its BOTTOM edge lands exactly on the slab's top face.
+    expect(result.point.yMm - baseArgs.movingSize.heightMm / 2).toBe(1200);
+    expect(result.snapTargetIds.y).toBe("shelf-top:shelf-1");
+  });
+
+  it("outranks the centerline on PRIORITY even when the eyeline is nearer (USER DECISION)", () => {
+    // 1443 is 3mm from the eyeline and 43mm from the shelf top; widen the
+    // threshold so both are eligible and only the tier ordering can decide.
+    const result = resolveArtworkSnap(
+      { xMm: 555, yMm: 1443 },
+      { ...baseArgs, shelves: [SHELF], snapToGrid: false, thresholdMm: 60 }
+    );
+    expect(result.snapTargetIds.y).toBe("shelf-top:shelf-1");
+    expect(result.point.yMm).toBe(1400);
+  });
+
+  it("outranks a neighbour tier and the grid too", () => {
+    const stacked = neighbor({ id: "n1", yMm: 1400, heightMm: 400 });
+    const result = resolveArtworkSnap(
+      { xMm: 555, yMm: 1410 },
+      { ...baseArgs, neighbors: [stacked], shelves: [SHELF], snapToGrid: true }
+    );
+    // neighbor-center:n1:y sits at exactly 1400 as well; the shelf target must
+    // be the one that claims the axis, or the guide would name the wrong thing.
+    expect(result.snapTargetIds.y).toBe("shelf-top:shelf-1");
+  });
+
+  it("holds the work on the shelf through the break-free hysteresis", () => {
+    const held = { ...baseArgs, shelves: [SHELF], snapToGrid: false };
+    // 25mm away is outside the 20mm base threshold, but inside the 1.5x
+    // break-free radius once the shelf target already owns the axis.
+    const sticky = resolveArtworkSnap(
+      { xMm: 555, yMm: 1425 },
+      { ...held, previousSnapTargetIds: { y: "shelf-top:shelf-1" } }
+    );
+    expect(sticky.snapTargetIds.y).toBe("shelf-top:shelf-1");
+    expect(sticky.point.yMm).toBe(1400);
+
+    // Without the sticky state the same pointer does not capture at all.
+    const fresh = resolveArtworkSnap({ xMm: 555, yMm: 1425 }, held);
+    expect(fresh.snapTargetIds.y).toBeUndefined();
+  });
+});

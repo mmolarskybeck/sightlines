@@ -138,6 +138,7 @@ describe("ExportPdfPreview — elevation supported-artwork ghost marks", () => {
       openings: [],
       wallTexts: [],
       cases: [],
+      shelves: [],
       floorCaseGhosts: [],
       suspendedArtworkGhosts: [],
       supportedArtworkGhosts: [
@@ -226,6 +227,7 @@ describe("ExportPdfPreview — elevation monitor ghost marks", () => {
       openings: [],
       wallTexts: [],
       cases: [],
+      shelves: [],
       floorCaseGhosts: [],
       suspendedArtworkGhosts: [],
       supportedArtworkGhosts: [],
@@ -311,5 +313,95 @@ describe("ExportPdfPreview — elevation monitor ghost marks", () => {
     // Bonnet footprint = support footprint (USER DECISION 2026-09-17).
     expect(Number(bonnet.getAttribute("x"))).toBeCloseTo(2650 * xf.scalePtPerMm);
     expect(Number(bonnet.getAttribute("width"))).toBeCloseTo(900 * xf.scalePtPerMm);
+  });
+});
+
+// A shelf is the newest wall kind, so the drift the card exists to catch is the
+// live one: the preview card and the PDF writer both read the SAME scene entry
+// (ElevationScene.shelves / a PlanScene wall-object rect), and these assert the
+// preview's marks against those numbers directly. The PDF twins
+// (drawElevationShelf, drawPlanObject's shelf branch) consume the identical
+// entries and the identical glyph module, so matching the entry here is what
+// "PDF and SVG parity" means for this kind.
+describe("ExportPdfPreview — shelf marks", () => {
+  const bounds: DocumentBoundsMm = BOUNDS;
+  const xf = planTransform(bounds, fitBoundsToRect(bounds, RECT));
+
+  it("draws the plan slab as a FILLED polygon at the scene rect's footprint", () => {
+    const shelfRect: PlanRect = {
+      centerXMm: 2000,
+      centerYMm: 1500,
+      widthMm: 1200,
+      depthMm: 300,
+      angleDeg: 0
+    };
+    const { container } = renderMarks(
+      planObjectMarks(shelfRect, "shelf", false, false, xf, "wobj-shelf")
+    );
+
+    const polygons = Array.from(container.querySelectorAll("polygon"));
+    // The object's own footprint, then the slab mark on top of it.
+    expect(polygons).toHaveLength(2);
+    const slab = polygons[1]!;
+    // Filled, not hollow: that is the whole of the shelf glyph.
+    expect(slab.getAttribute("fill")).not.toBe("none");
+    const xs = slab
+      .getAttribute("points")!
+      .split(" ")
+      .map((pair) => Number(pair.split(",")[0]));
+    const ys = slab
+      .getAttribute("points")!
+      .split(" ")
+      .map((pair) => Number(pair.split(",")[1]));
+    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(1200 * xf.scalePtPerMm);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(300 * xf.scalePtPerMm);
+  });
+
+  it("draws the elevation band from the scene entry's span and slab centre", () => {
+    const scene: ElevationScene = {
+      wallLengthMm: 4000,
+      wallHeightMm: 3000,
+      floorLineSvgY: 3000,
+      centerlineSvgY: 1500,
+      artworks: [],
+      openings: [],
+      wallTexts: [],
+      cases: [],
+      shelves: [
+        {
+          objectId: "wobj-shelf",
+          xMinMm: 1000,
+          xMaxMm: 2200,
+          // Slab CENTRE at 1180 with a 40mm thickness — top face at 1200.
+          yMm: 1180,
+          heightMm: 40,
+          depthMm: 300
+        }
+      ],
+      floorCaseGhosts: [],
+      suspendedArtworkGhosts: [],
+      supportedArtworkGhosts: [],
+      monitorGhosts: [],
+      partitionProfiles: []
+    };
+
+    const { container } = renderMarks(
+      elevationPageMarks(scene, bounds, xf, settings(), false)
+    );
+
+    // The wall's own face rect is drawn first; the slab is the one carrying
+    // the entry's span.
+    const slab = Array.from(container.querySelectorAll("rect")).find(
+      (rect) =>
+        !rect.getAttribute("stroke-dasharray") &&
+        Math.abs(Number(rect.getAttribute("width")) - 1200 * xf.scalePtPerMm) < 0.01
+    );
+    expect(slab).toBeTruthy();
+    expect(Number(slab!.getAttribute("x"))).toBeCloseTo(1000 * xf.scalePtPerMm);
+    expect(Number(slab!.getAttribute("width"))).toBeCloseTo(1200 * xf.scalePtPerMm);
+    // SVG-y-down from the wall top: the slab's TOP face (1200) is 1800 down.
+    expect(Number(slab!.getAttribute("y"))).toBeCloseTo(1800 * xf.scalePtPerMm);
+    expect(Number(slab!.getAttribute("height"))).toBeCloseTo(40 * xf.scalePtPerMm);
+    expect(slab!.getAttribute("fill")).not.toBe("none");
   });
 });

@@ -310,7 +310,13 @@ export function ThreeDView({
   // app-level id is the iPadOS fallback for a dataTransfer that hides custom
   // MIME types, and the module-level drag session is the fallback for that.
   draggingArtworkId?: string | null;
-  onPlaceArtwork?: (artworkId: string, wallId: string, xMm: number, yMm: number) => void;
+  onPlaceArtwork?: (
+    artworkId: string,
+    wallId: string,
+    xMm: number,
+    yMm: number,
+    seatOnShelfId?: string
+  ) => void;
   onPlaceArtworkOnFloor?: (artworkId: string, xMm: number, yMm: number) => void;
   // Commit of a pointer-drag of an ALREADY-PLACED object, called exactly once
   // on release (the view previews the move locally until then), so one drag is
@@ -401,6 +407,12 @@ export function ThreeDView({
   function dragSourceFor(objectId: string): ThreeDragSource | null {
     const wallObject = project.wallObjects.find((object) => object.id === objectId);
     if (wallObject) {
+      // A SHELF is deliberately absent from this list (USER DECISION): it is
+      // selectable in 3D and not draggable this round, because a shelf carries
+      // the works standing on it on every other move path and this drag moves
+      // one object at a time. WallShelfMesh installs no drag handler either, so
+      // a press on a slab can never reach here — this guard is the second half
+      // of the same decision, not a redundancy.
       if (wallObject.kind !== "artwork" && wallObject.kind !== "case") return null;
       // The wall clamp is governed by the OUTER (mat + frame) box, exactly as
       // the drop's is — read through effectiveFraming so a work whose stored
@@ -417,6 +429,10 @@ export function ThreeDView({
       return {
         anchor: "wall",
         objectId,
+        // Only an artwork can stand on a shelf, so the kind travels with the
+        // source and resolveDragMove gates seating on it (a wall case dragged
+        // past a slab must not be seated on it).
+        kind: wallObject.kind,
         wallId: wallObject.wallId,
         xMm: wallObject.xMm,
         yMm: wallObject.yMm,
@@ -474,7 +490,12 @@ export function ThreeDView({
           surface: pickSurfaceUnderCursor(event.clientX, event.clientY),
           source: current.source,
           offsetMm: current.offsetMm,
-          walls: placeableWalls
+          walls: placeableWalls,
+          // A shelf is a SURFACE: dragging a work over one stands it on the
+          // slab, the same gesture as in elevation and plan. ⌘/Ctrl is the same
+          // precision bypass elevation uses — held, the work hangs freely.
+          wallObjects: project.wallObjects,
+          seatOnShelves: !(event.metaKey || event.ctrlKey)
         }) ?? current.move;
 
       // frameloop="demand": nothing redraws unless we ask, and the preview is
@@ -655,6 +676,19 @@ export function ThreeDView({
   // surfaces, and the whole point of the 3D drop is "roughly there, in the
   // room I'm looking at".
   const [dropGhost, setDropGhost] = useState<DropGhostTransform | null>(null);
+  // The shelf the checklist drop under the cursor would stand the work on, so
+  // the slab can light up while it is captured (the 3D half of "a surface
+  // announces itself"). Null whenever the drop would hang the work freely.
+  const [dropShelfId, setDropShelfId] = useState<string | null>(null);
+
+  // The slab a live gesture would stand its work on — the checklist drop's, or
+  // the object drag's. Only one of the two can be in flight at a time, and the
+  // drag wins the read because it is the one holding the pointer. Drives the
+  // shelf's snap-target outline, the 3D half of "a surface announces itself".
+  const shelfSnapTargetId =
+    (objectDrag?.active && objectDrag.move?.anchor === "wall"
+      ? objectDrag.move.shelfId
+      : undefined) ?? dropShelfId;
 
   // The dragged work's image aspect, so a partial/unknown-dimension work
   // previews at its true proportions — the same read placeArtwork itself makes
@@ -692,20 +726,31 @@ export function ThreeDView({
   // pickDropSurface walks the (near→far) intersections for the first tagged
   // wall/floor, so a hit on an artwork plane, a pick band or a door leaf falls
   // through to the surface behind it instead of killing the drop.
-  function resolveDropUnderCursor(clientX: number, clientY: number, artworkId: string | null) {
+  function resolveDropUnderCursor(
+    clientX: number,
+    clientY: number,
+    artworkId: string | null,
+    // ⌘/Ctrl held: the precision bypass, exactly as in elevation and plan — the
+    // work lands at the height the cursor names instead of on the shelf under
+    // it.
+    bypassSnap = false
+  ) {
     const surface = pickSurfaceUnderCursor(clientX, clientY);
     if (!surface) return null;
     return resolveThreeDrop({
       point: surface.point,
       tag: surface.tag,
       walls: placeableWalls,
-      dims: dropDimsFor(artworkId)
+      dims: dropDimsFor(artworkId),
+      wallObjects: project.wallObjects,
+      seatOnShelves: !bypassSnap
     });
   }
 
-  function paintDropGhost(ghost: DropGhost3d | null) {
+  function paintDropGhost(ghost: DropGhost3d | null, shelfId: string | null = null) {
     const api = dropRaycastRef.current;
     setDropGhost(ghost && api ? dropGhostTransform(ghost, api.camera.position) : null);
+    setDropShelfId(shelfId);
     // frameloop="demand": nothing redraws unless we ask.
     api?.invalidate();
   }
@@ -716,10 +761,14 @@ export function ThreeDView({
   function updateDropGhost(
     clientX: number,
     clientY: number,
-    artworkId: string | null
+    artworkId: string | null,
+    bypassSnap = false
   ): boolean {
-    const resolved = resolveDropUnderCursor(clientX, clientY, artworkId);
-    paintDropGhost(resolved?.ghost ?? null);
+    const resolved = resolveDropUnderCursor(clientX, clientY, artworkId, bypassSnap);
+    paintDropGhost(
+      resolved?.ghost ?? null,
+      (resolved?.anchor === "wall" ? resolved.shelfId : undefined) ?? null
+    );
     return resolved !== null;
   }
 
@@ -731,14 +780,19 @@ export function ThreeDView({
   // the work's library placementForm. Both store actions carry their own
   // guards (open wall, already placed), and placeArtwork also moves the
   // elevation wall context to the drop wall — nothing to duplicate here.
-  function completeDrop(clientX: number, clientY: number, artworkId: string) {
-    const resolved = resolveDropUnderCursor(clientX, clientY, artworkId);
+  function completeDrop(
+    clientX: number,
+    clientY: number,
+    artworkId: string,
+    bypassSnap = false
+  ) {
+    const resolved = resolveDropUnderCursor(clientX, clientY, artworkId, bypassSnap);
     if (!resolved) return;
     if (resolved.anchor === "floor") {
       onPlaceArtworkOnFloor?.(artworkId, resolved.xMm, resolved.yMm);
       return;
     }
-    onPlaceArtwork?.(artworkId, resolved.wallId, resolved.xMm, resolved.yMm);
+    onPlaceArtwork?.(artworkId, resolved.wallId, resolved.xMm, resolved.yMm, resolved.shelfId);
   }
 
   function handleArtworkDragOver(event: ReactDragEvent<HTMLDivElement>) {
@@ -752,7 +806,12 @@ export function ThreeDView({
       return;
     }
     event.preventDefault();
-    const overSurface = updateDropGhost(event.clientX, event.clientY, draggingArtworkId);
+    const overSurface = updateDropGhost(
+      event.clientX,
+      event.clientY,
+      draggingArtworkId,
+      event.metaKey || event.ctrlKey
+    );
     // Empty space between rooms (or the back of a single-sided wall) is not a
     // placement surface: say so with the cursor rather than accepting a drop
     // that would do nothing.
@@ -776,7 +835,7 @@ export function ThreeDView({
     if (!artworkId) return;
     if (!artworksById.get(artworkId)) return;
     event.preventDefault();
-    completeDrop(event.clientX, event.clientY, artworkId);
+    completeDrop(event.clientX, event.clientY, artworkId, event.metaKey || event.ctrlKey);
   }
 
   // The touch/pen drag path (iOS/iPadOS, where HTML5 DnD is unavailable or
@@ -1066,6 +1125,7 @@ export function ThreeDView({
           getBlob={getBlob}
           artworksById={artworksById}
           selectedObjectIds={selectedObjectIds}
+          shelfSnapTargetId={shelfSnapTargetId}
           selectedArtworkId={selectedArtworkId}
           selectedWallId={selectedWallId}
           onSelectWall={onSelectWall}

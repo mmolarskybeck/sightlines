@@ -6,7 +6,7 @@ export type Point = {
 export type SnapTarget = {
   id: string;
   point: Point;
-  kind: "floor" | "centerline" | "neighbor-center" | "neighbor-edge" | "grid";
+  kind: "shelf-top" | "floor" | "centerline" | "neighbor-center" | "neighbor-edge" | "grid";
   axis: "x" | "y" | "both";
   // Optional explicit rank overriding the kind's default (lower wins). Used
   // by the floor target, whose rank depends on what is being moved: primary
@@ -75,6 +75,13 @@ export type SnapOptions = {
 // override the floor target's rank to 0 via SnapTarget.priority — for a
 // door the floor IS the primary destination (see getArtworkSnapTargets).
 const KIND_PRIORITY: Record<SnapTarget["kind"], number> = {
+  // A shelf top OUTRANKS the centerline (USER DECISION). The target is only
+  // ever offered for a shelf the moving work already overlaps horizontally
+  // (getArtworkSnapTargets' pre-filtered `shelves`), so once the work is also
+  // within capture range of that shelf's top face, the physical support
+  // relationship — this thing is standing on that thing — beats the general
+  // curatorial eyeline convention.
+  "shelf-top": 0.5,
   centerline: 1,
   floor: 1.5,
   "neighbor-center": 2,
@@ -90,7 +97,7 @@ function priorityOf(target: SnapTarget): number {
 // from separate per-axis candidate pools, so a high-priority y-only target
 // (the centerline) never suppresses an x snap (a grid line) — an artwork can
 // sit on the eyeline and land on the grid at the same time. Within one axis
-// the tier ordering is: [floor first for doors] > centerline > floor >
+// the tier ordering is: [floor first for doors] > shelf-top > centerline > floor >
 // neighbor-center > neighbor-edge > grid (docs/plan.md §2), then distance,
 // then id for a stable tiebreak. An `axis: "both"` target competes on each
 // axis using that axis's own delta and may win either or both.

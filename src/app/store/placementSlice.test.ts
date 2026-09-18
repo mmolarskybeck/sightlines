@@ -10,7 +10,8 @@
 // sessions, multi-select, and the "opening connections" tests that pose
 // addOpening/moveOpening alongside a resolver action in the same test — stay
 // in ../store.test.ts, the integration suite.
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 import {
   DEFAULT_FLOOR_CASE_DEPTH_MM,
   DEFAULT_FLOOR_CASE_HEIGHT_MM,
@@ -21,10 +22,18 @@ import {
   DEFAULT_WALL_CASE_HEIGHT_MM,
   DEFAULT_WALL_CASE_WIDTH_MM,
   MONITOR_ASPECT_RATIO,
+  DEFAULT_SHELF_DEPTH_MM,
+  DEFAULT_SHELF_THICKNESS_MM,
+  DEFAULT_SHELF_TOP_MM,
+  DEFAULT_SHELF_WIDTH_MM,
   MONITOR_DEPTH_MM,
-  MONITOR_PEDESTAL_HEIGHT_MM
+  MONITOR_PEDESTAL_HEIGHT_MM,
+  SHELF_END_MARGIN_MM
 } from "../../domain/project";
-import type { Project } from "../../domain/project";
+import type { Project, ShelfWallObject } from "../../domain/project";
+import { shelfTopYMm } from "../../domain/geometry/shelfGlyphs";
+import { createShelf } from "../../domain/placement/createShelf";
+import { getShelfRiders } from "../../domain/placement/shelfRiders";
 import { PLACEHOLDER_ARTWORK_WIDTH_MM } from "../../domain/placement/placeArtwork";
 import { createRectangularRoomPlacement } from "../../domain/geometry/createRoom";
 import { getFloorWalls } from "../../domain/geometry/planObjects";
@@ -43,11 +52,24 @@ import {
   getSelectedWall
 } from "../store";
 
+// The shelf-removal notice speaks through sonner (the same channel store.ts's
+// reportSupportRepairs uses), not the error banner; capture it without
+// rendering a Toaster.
+vi.mock("sonner", () => ({
+  toast: {
+    info: vi.fn(),
+    warning: vi.fn(),
+    success: vi.fn(),
+    error: vi.fn()
+  }
+}));
+
 describe("placement slice", () => {
   let repository: InMemoryProjectRepository;
   let store: ReturnType<typeof createAppStore>;
 
   beforeEach(async () => {
+    vi.mocked(toast.info).mockClear();
     const testStore = createTestAppStore();
     repository = testStore.projectRepository;
     store = testStore.store;
@@ -78,6 +100,82 @@ describe("placement slice", () => {
         expect(placement.widthMm).toBe(500);
         expect(placement.heightMm).toBe(400);
         expect(getSelectedArtworkId(state.project, state.selection)).toBe(artworkId);
+      });
+
+      // The size passed in by the caller (plan/elevation/3D) may still be a
+      // placeholder if the image aspect hadn't loaded when the drop resolved;
+      // placeArtwork bakes the real size from the artwork's known dimensions,
+      // so seating has to happen AFTER that bake, from the shelf the caller
+      // says it seated on, not from the y the caller computed beforehand.
+      it("re-seats onto the given shelf using the size baked during this call", async () => {
+        await store.getState().addArtworksFromFiles([makeImageFile("piece.jpg")]);
+        const artworkId = store.getState().project!.checklistArtworkIds[0];
+        await store.getState().updateArtwork(artworkId, {
+          dimensions: { widthMm: 500, heightMm: 400, status: "known" }
+        });
+        const wallId = getSelectedWall(
+          store.getState().project!,
+          store.getState().wallContextId
+        )!.id;
+
+        const shelf = createShelf({ wallId, xMm: 1200, topMm: 1000 });
+        const base = store.getState().project!;
+        store.setState({
+          project: { ...base, wallObjects: [...base.wallObjects, shelf] }
+        });
+
+        await store
+          .getState()
+          .placeArtwork(artworkId, wallId, 1200, 9999, false, { seatOnShelfId: shelf.id });
+
+        const placement = store
+          .getState()
+          .project!.wallObjects.find((object) => object.kind === "artwork")!;
+        expect(placement.yMm - placement.heightMm / 2).toBe(1000);
+      });
+
+      // The framed OUTER bottom is what stands on the slab, so a framed work
+      // dropped onto a shelf sits one band (mat + frame) higher than its image
+      // box alone would put it — which is also the only y that makes it a rider.
+      it("stands a framed work's OUTER bottom on the shelf it was seated on", async () => {
+        await store.getState().addArtworksFromFiles([makeImageFile("framed-seat.jpg")]);
+        const artworkId = store.getState().project!.checklistArtworkIds[0];
+        await store.getState().updateArtwork(artworkId, {
+          dimensions: { widthMm: 500, heightMm: 400, status: "known" },
+          matWidthMm: 50,
+          frame: { widthMm: 25, finish: "black" }
+        });
+        const wallId = getSelectedWall(
+          store.getState().project!,
+          store.getState().wallContextId
+        )!.id;
+
+        const shelf = createShelf({ wallId, xMm: 1200, topMm: 1000 });
+        const base = store.getState().project!;
+        store.setState({
+          project: { ...base, wallObjects: [...base.wallObjects, shelf] }
+        });
+
+        await store
+          .getState()
+          .placeArtwork(artworkId, wallId, 1200, 9999, false, { seatOnShelfId: shelf.id });
+
+        const state = store.getState();
+        const placement = state.project!.wallObjects.find(
+          (object) => object.kind === "artwork"
+        )!;
+        // Stored box is still the image (400 tall), but its centre sits half
+        // the OUTER height (550/2) above the top face.
+        expect(placement.heightMm).toBe(400);
+        expect(placement.yMm - (400 + 2 * 75) / 2).toBe(1000);
+        const artworksById = new Map(
+          state.libraryArtworks.map((artwork) => [artwork.id, artwork])
+        );
+        expect(
+          getShelfRiders(shelf, state.project!.wallObjects, artworksById).map(
+            (rider) => rider.id
+          )
+        ).toEqual([placement.id]);
       });
 
       it("stores image dimensions for a framed placement", async () => {
@@ -3133,6 +3231,316 @@ describe("placement slice", () => {
         const wallText = store.getState().project!.wallObjects.find((o) => o.id === id)!;
         expect(wallText.widthMm).toBe(900);
         expect(wallText.heightMm).toBe(500);
+      });
+    });
+
+    // Shelves: their own wall object, whose relationship to the works standing
+    // on it (its RIDERS) is derived from geometry on every path and never
+    // stored — so these tests are about whether each store path rederives it
+    // the same way. See domain/placement/shelfRiders.ts.
+    describe("shelves", () => {
+      // A placed work with known dimensions, hung on the north wall.
+      async function placeWork({
+        xMm,
+        yMm,
+        widthMm = 500,
+        heightMm = 400
+      }: {
+        xMm: number;
+        yMm: number;
+        widthMm?: number;
+        heightMm?: number;
+      }): Promise<string> {
+        await store.getState().addArtworksFromFiles([makeImageFile(`work-${xMm}-${yMm}.jpg`)]);
+        const artworkId = store.getState().project!.checklistArtworkIds.at(-1)!;
+        await store.getState().updateArtwork(artworkId, {
+          dimensions: { widthMm, heightMm, status: "known" }
+        });
+        await store.getState().placeArtwork(artworkId, "wall-north", xMm, yMm);
+        return store.getState().project!.wallObjects.find(
+          (object) => object.kind === "artwork" && object.artworkId === artworkId
+        )!.id;
+      }
+
+      // Same as placeWork, but the record carries a 50mm mat and a 25mm frame
+      // face — so its framed outer footprint is 150mm wider and taller than the
+      // stored image box (75mm of band per side).
+      const FRAMED_BAND_PER_SIDE_MM = 75;
+      async function placeFramedWork({
+        xMm,
+        yMm,
+        widthMm = 500,
+        heightMm = 400
+      }: {
+        xMm: number;
+        yMm: number;
+        widthMm?: number;
+        heightMm?: number;
+      }): Promise<string> {
+        await store
+          .getState()
+          .addArtworksFromFiles([makeImageFile(`framed-${xMm}-${yMm}.jpg`)]);
+        const artworkId = store.getState().project!.checklistArtworkIds.at(-1)!;
+        await store.getState().updateArtwork(artworkId, {
+          dimensions: { widthMm, heightMm, status: "known" },
+          matWidthMm: 50,
+          frame: { widthMm: 25, finish: "black" }
+        });
+        await store.getState().placeArtwork(artworkId, "wall-north", xMm, yMm);
+        return store.getState().project!.wallObjects.find(
+          (object) => object.kind === "artwork" && object.artworkId === artworkId
+        )!.id;
+      }
+
+      function shelfOf(): ShelfWallObject {
+        return store
+          .getState()
+          .project!.wallObjects.find((object): object is ShelfWallObject =>
+            object.kind === "shelf"
+          )!;
+      }
+
+      function objectById(id: string) {
+        return store.getState().project!.wallObjects.find((object) => object.id === id)!;
+      }
+
+      describe("addShelfUnderWallArtwork", () => {
+        it("sizes the slab from the work, seats its TOP at the work's bottom edge, and selects both", async () => {
+          const workId = await placeWork({ xMm: 2000, yMm: 1500, widthMm: 600, heightMm: 400 });
+
+          await store.getState().addShelfUnderWallArtwork(workId);
+
+          const state = store.getState();
+          expect(state.undoStack.at(-1)?.label).toBe("Add shelf");
+          const shelf = shelfOf();
+          expect(shelf.wallId).toBe("wall-north");
+          expect(shelf.xMm).toBe(2000);
+          expect(shelf.widthMm).toBe(600 + 2 * SHELF_END_MARGIN_MM);
+          expect(shelf.heightMm).toBe(DEFAULT_SHELF_THICKNESS_MM);
+          expect(shelf.depthMm).toBe(DEFAULT_SHELF_DEPTH_MM);
+          // Top face flush with the work's bottom edge (1500 - 400/2 = 1300),
+          // which is exactly what makes the work a RIDER of this shelf.
+          expect(shelfTopYMm(shelf)).toBe(1300);
+          expect(getShelfRiders(shelf, state.project!.wallObjects).map((r) => r.id)).toEqual([
+            workId
+          ]);
+          // Both selected, so the next drag moves the little assembly together.
+          expect(state.selection).toEqual({ kind: "objects", ids: [workId, shelf.id] });
+        });
+
+        // The framed OUTER footprint bottom is the foot, everywhere: seating
+        // the slab under the stored image bottom used to leave the frame
+        // overlapping the slab AND — because getShelfRiders measures the same
+        // outer edge — left the work not carried by the shelf it just got.
+        it("seats the slab under a framed work's OUTER bottom, and it rides", async () => {
+          const workId = await placeFramedWork({
+            xMm: 2000,
+            yMm: 1500,
+            widthMm: 600,
+            heightMm: 400
+          });
+
+          await store.getState().addShelfUnderWallArtwork(workId);
+
+          const state = store.getState();
+          const shelf = shelfOf();
+          // Outer bottom = 1500 - (400 + 2*75)/2 = 1225, not the image bottom
+          // at 1300; outer width 600 + 150 = 750 plus the end margins.
+          expect(shelfTopYMm(shelf)).toBe(1500 - (400 + 2 * FRAMED_BAND_PER_SIDE_MM) / 2);
+          expect(shelf.widthMm).toBe(
+            600 + 2 * FRAMED_BAND_PER_SIDE_MM + 2 * SHELF_END_MARGIN_MM
+          );
+          const artworksById = new Map(
+            state.libraryArtworks.map((artwork) => [artwork.id, artwork])
+          );
+          expect(
+            getShelfRiders(shelf, state.project!.wallObjects, artworksById).map((r) => r.id)
+          ).toEqual([workId]);
+        });
+
+        it("does nothing for an id that is not a wall artwork", async () => {
+          await store.getState().addOpening("wall-north", "shelf");
+          const shelfId = shelfOf().id;
+
+          await store.getState().addShelfUnderWallArtwork(shelfId);
+
+          expect(
+            store.getState().project!.wallObjects.filter((o) => o.kind === "shelf")
+          ).toHaveLength(1);
+        });
+      });
+
+      describe("updateShelf", () => {
+        it("carries the riders by the same Δx and Δtop, in one undo entry", async () => {
+          const workId = await placeWork({ xMm: 2000, yMm: 1500, widthMm: 600, heightMm: 400 });
+          await store.getState().addShelfUnderWallArtwork(workId);
+          const shelfId = shelfOf().id;
+          const undoDepth = store.getState().undoStack.length;
+
+          // Slide 300 along the wall and lift the whole slab 200 (the centre
+          // moves with the top while the thickness is untouched).
+          await store.getState().updateShelf(shelfId, { xMm: 2300, yMm: shelfOf().yMm + 200 });
+
+          const shelf = shelfOf();
+          expect(shelf.xMm).toBe(2300);
+          expect(shelfTopYMm(shelf)).toBe(1500);
+          const work = objectById(workId);
+          expect(work.xMm).toBe(2300);
+          expect(work.yMm).toBe(1700);
+          // ONE entry: undo puts the slab and its work back together.
+          expect(store.getState().undoStack.length).toBe(undoDepth + 1);
+          expect(store.getState().undoStack.at(-1)?.label).toBe("Edit shelf");
+          await store.getState().undo();
+          expect(objectById(workId).xMm).toBe(2000);
+          expect(objectById(workId).yMm).toBe(1500);
+          expect(shelfOf().xMm).toBe(2000);
+        });
+
+        it("keeps the TOP fixed and leaves the riders alone for width/depth/thickness", async () => {
+          const workId = await placeWork({ xMm: 2000, yMm: 1500, widthMm: 600, heightMm: 400 });
+          await store.getState().addShelfUnderWallArtwork(workId);
+          const shelfId = shelfOf().id;
+          const workBefore = objectById(workId);
+
+          await store
+            .getState()
+            .updateShelf(shelfId, { widthMm: 1600, depthMm: 250, heightMm: 80 });
+
+          const shelf = shelfOf();
+          expect(shelf.widthMm).toBe(1600);
+          expect(shelf.depthMm).toBe(250);
+          expect(shelf.heightMm).toBe(80);
+          // A thicker slab grows DOWNWARD: the top face — and so the work
+          // standing on it — does not move.
+          expect(shelfTopYMm(shelf)).toBe(1300);
+          expect(shelf.yMm).toBe(1300 - 40);
+          const work = objectById(workId);
+          expect(work.xMm).toBe(workBefore.xMm);
+          expect(work.yMm).toBe(workBefore.yMm);
+          // And the work is still standing on it afterwards.
+          expect(
+            getShelfRiders(shelf, store.getState().project!.wallObjects).map((r) => r.id)
+          ).toEqual([workId]);
+        });
+
+        it("ignores a no-op edit and a non-shelf id", async () => {
+          await store.getState().addOpening("wall-north", "shelf");
+          const shelf = shelfOf();
+          const undoDepth = store.getState().undoStack.length;
+
+          await store.getState().updateShelf(shelf.id, { xMm: shelf.xMm, yMm: shelf.yMm });
+          await store.getState().updateShelf("no-such-object", { xMm: 10 });
+
+          expect(store.getState().undoStack.length).toBe(undoDepth);
+        });
+
+        it("leaves a work that is merely hanging near the shelf where it is", async () => {
+          const workId = await placeWork({ xMm: 2000, yMm: 1500, widthMm: 600, heightMm: 400 });
+          await store.getState().addShelfUnderWallArtwork(workId);
+          // A second work on the same wall, well above the slab: near it, but
+          // not standing on it.
+          const hangingId = await placeWork({ xMm: 2000, yMm: 2200, widthMm: 400, heightMm: 300 });
+          const shelfId = shelfOf().id;
+
+          await store.getState().updateShelf(shelfId, { xMm: 2400 });
+
+          expect(objectById(workId).xMm).toBe(2400);
+          expect(objectById(hangingId).xMm).toBe(2000);
+        });
+      });
+
+      describe("deleting a shelf", () => {
+        it("leaves its works in place and says how many, with no confirm", async () => {
+          const firstId = await placeWork({ xMm: 1800, yMm: 1500, widthMm: 400, heightMm: 400 });
+          await store.getState().addShelfUnderWallArtwork(firstId);
+          const shelf = shelfOf();
+          // A second work standing on the same slab, seated on its top face.
+          const secondId = await placeWork({
+            xMm: 2100,
+            yMm: shelfTopYMm(shelf) + 150,
+            widthMm: 200,
+            heightMm: 300
+          });
+
+          await store.getState().removePlacement(shelf.id);
+
+          const state = store.getState();
+          expect(state.project!.wallObjects.some((o) => o.kind === "shelf")).toBe(false);
+          expect(objectById(firstId).xMm).toBe(1800);
+          expect(objectById(secondId).xMm).toBe(2100);
+          expect(state.error).toBeNull();
+          expect(toast.info).toHaveBeenCalledWith("Shelf removed; 2 works left in place.");
+        });
+
+        it("says nothing when the shelf was carrying nothing", async () => {
+          await store.getState().addOpening("wall-north", "shelf");
+
+          await store.getState().removePlacement(shelfOf().id);
+
+          expect(store.getState().error).toBeNull();
+          expect(toast.info).not.toHaveBeenCalled();
+        });
+
+        it("says the same thing on the keyboard delete path", async () => {
+          const workId = await placeWork({ xMm: 2000, yMm: 1500, widthMm: 600, heightMm: 400 });
+          await store.getState().addShelfUnderWallArtwork(workId);
+          const shelfId = shelfOf().id;
+          store.getState().setObjectSelection([shelfId]);
+
+          await store.getState().removeSelectedPlacements();
+
+          expect(toast.info).toHaveBeenCalledWith("Shelf removed; 1 work left in place.");
+          expect(store.getState().error).toBeNull();
+          expect(objectById(workId).yMm).toBe(1500);
+        });
+      });
+
+      describe("insert-tool placement", () => {
+        it("places a shelf at the plan-chosen x on a wall anchor", async () => {
+          await store
+            .getState()
+            .placeOpeningFromPlan("shelf", { anchor: "wall", wallId: "wall-north", xMm: 1234 });
+
+          const state = store.getState();
+          expect(state.error).toBeNull();
+          expect(state.undoStack.at(-1)?.label).toBe("Add shelf");
+          const shelf = shelfOf();
+          expect(shelf.xMm).toBe(1234);
+          expect(shelf.widthMm).toBe(DEFAULT_SHELF_WIDTH_MM);
+          expect(shelfTopYMm(shelf)).toBe(DEFAULT_SHELF_TOP_MM);
+          expect(state.selection).toEqual({ kind: "objects", ids: [shelf.id] });
+        });
+
+        it("places nothing on a floor click and says why", async () => {
+          await store
+            .getState()
+            .placeOpeningFromPlan("shelf", { anchor: "floor", xMm: 2000, yMm: 3000 });
+
+          const state = store.getState();
+          expect(state.project!.wallObjects).toHaveLength(0);
+          expect(state.project!.floorObjects).toHaveLength(0);
+          expect(state.error).toBe("A shelf hangs on a wall. Click a wall to place it.");
+        });
+
+        it("places a shelf from elevation, centred on the clicked height", async () => {
+          await store.getState().placeOpeningOnElevation("shelf", "wall-north", 1500, 900);
+
+          const shelf = shelfOf();
+          expect(shelf.xMm).toBe(1500);
+          expect(shelf.yMm).toBe(900);
+          expect(shelfTopYMm(shelf)).toBe(900 + DEFAULT_SHELF_THICKNESS_MM / 2);
+          expect(store.getState().selection).toEqual({ kind: "objects", ids: [shelf.id] });
+        });
+
+        it("adds a shelf at the wall's midpoint from the wall path", async () => {
+          const wall = getSelectedWall(store.getState().project!, "wall-north")!;
+
+          await store.getState().addOpening("wall-north", "shelf");
+
+          const shelf = shelfOf();
+          expect(shelf.xMm).toBe(wall.lengthMm / 2);
+          expect(shelfTopYMm(shelf)).toBe(DEFAULT_SHELF_TOP_MM);
+        });
       });
     });
 });

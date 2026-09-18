@@ -14,6 +14,7 @@ import {
 } from "../../../domain/geometry/sharedOpeningStatus";
 import { getOpeningKindLabel } from "../../../domain/placement/createOpening";
 import { derivePartitionNeighborShimsForFloorWall } from "../../../domain/placement/partitionNeighbors";
+import { getShelfRiders } from "../../../domain/placement/shelfRiders";
 import { withArtworkFootprintFromMap } from "../../../domain/framing";
 import type {
   Artwork,
@@ -25,8 +26,10 @@ import type {
   DisplayUnit,
   FreestandingWall,
   OpeningWallObject,
+  ShelfWallObject,
   WallTextWallObject
 } from "../../../domain/project";
+import { shelfCenterYMmForTop } from "../../../domain/geometry/shelfGlyphs";
 import { faceWallId, parseFaceWallId } from "../../../domain/geometry/freestandingWalls";
 import { getPartitionClearances } from "../../../domain/geometry/partitionSpacing";
 import { isMonitorArtwork } from "../../../domain/geometry/monitorGlyphs";
@@ -44,6 +47,9 @@ import {
   describeSharedOpeningTarget
 } from "../placement/sharedOpeningIssueCopy";
 import { FloorCaseInspector, WallCaseInspector } from "./CaseInspector";
+import { ShelfInspector } from "./ShelfInspector";
+import { ShelfGlyph } from "../toolbar/toolbarGlyphs";
+import { Button } from "../ui/button";
 import { FloorObjectInspector, FloorPlacementFields } from "./FloorObjectInspector";
 import { FloorArtworkImageFacesField } from "./FloorArtworkImageFacesField";
 import { StandsOnField } from "./StandsOnField";
@@ -62,6 +68,8 @@ import {
   getWallPlacementCenterTarget,
   getWallPlacementNeighborEdges
 } from "./WallPlacementFields";
+import { InspectorSummaryRow } from "./InspectorSummaryRow";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { WallInspector } from "./WallInspector";
 import { WallTextInspector } from "./WallTextInspector";
 import { useArtworksById } from "../../hooks/useArtworksById";
@@ -124,6 +132,7 @@ export function InspectorPane({
   const placementWarnings = useAppStore((state) => state.placementWarnings);
   const lastGeometryEdit = useAppStore((state) => state.lastGeometryEdit);
   const selectOpening = useAppStore((state) => state.selectOpening);
+  const setObjectSelection = useAppStore((state) => state.setObjectSelection);
   const addReferenceMeasurement = useAppStore((state) => state.addReferenceMeasurement);
   const updateReferenceMeasurement = useAppStore((state) => state.updateReferenceMeasurement);
   const deleteReferenceMeasurement = useAppStore((state) => state.deleteReferenceMeasurement);
@@ -147,6 +156,7 @@ export function InspectorPane({
   const removePlacement = useAppStore((state) => state.removePlacement);
   const addOpening = useAppStore((state) => state.addOpening);
   const addWallCase = useAppStore((state) => state.addWallCase);
+  const addShelfUnderWallArtwork = useAppStore((state) => state.addShelfUnderWallArtwork);
   const moveOpening = useAppStore((state) => state.moveOpening);
   const resizeOpening = useAppStore((state) => state.resizeOpening);
   const fitOpeningToAvailableSpan = useAppStore((state) => state.fitOpeningToAvailableSpan);
@@ -170,6 +180,7 @@ export function InspectorPane({
     (state) => state.pairFloorArtworksBackToBack
   );
   const updateWallCase = useAppStore((state) => state.updateWallCase);
+  const updateShelf = useAppStore((state) => state.updateShelf);
   const removeSelectedPlacements = useAppStore((state) => state.removeSelectedPlacements);
   const beginArrangeSession = useAppStore((state) => state.beginArrangeSession);
   const setArrangeAnchor = useAppStore((state) => state.setArrangeAnchor);
@@ -368,6 +379,19 @@ export function InspectorPane({
   const placedWallObjectWall = placedWallObject
     ? (getProjectWalls(project).find((wall) => wall.id === placedWallObject.wallId) ?? null)
     : null;
+  // What this work rests on: the first shelf whose derived riders include it.
+  // Riders are geometry-derived (getShelfRiders), never stored, so this reads
+  // the live relationship instead of any membership the work might have had a
+  // moment ago.
+  const standingShelf: ShelfWallObject | null = placedWallObject
+    ? (project.wallObjects.find(
+        (wallObject): wallObject is ShelfWallObject =>
+          wallObject.kind === "shelf" &&
+          getShelfRiders(wallObject, project.wallObjects, artworksById).some(
+            (rider) => rider.id === placedWallObject.id
+          )
+      ) ?? null)
+    : null;
   // A partition standing at a wall bounds that wall's hanging zone, so the
   // inspector's numeric affordances (neighbor distances, the Center button) have
   // to see it as a neighbor exactly like the elevation's dimension lines do.
@@ -404,6 +428,7 @@ export function InspectorPane({
           wallObject.kind !== "artwork" &&
           wallObject.kind !== "wall-text" &&
           wallObject.kind !== "case" &&
+          wallObject.kind !== "shelf" &&
           wallObject.id === selectedOpeningId
       ) ?? null)
     : null;
@@ -442,6 +467,28 @@ export function InspectorPane({
           floorObject.kind === "case" && floorObject.id === selectedOpeningId
       ) ?? null)
     : null;
+
+  // A shelf shares the opening-selection id space with the cases above and is
+  // resolved out of `selectedOpening` the same way, for the same reason: it has
+  // its own inspector. Wall-only, so there is no floor counterpart to derive.
+  const selectedWallShelf: ShelfWallObject | null = selectedOpeningId
+    ? (project.wallObjects.find(
+        (wallObject): wallObject is ShelfWallObject =>
+          wallObject.kind === "shelf" && wallObject.id === selectedOpeningId
+      ) ?? null)
+    : null;
+  const selectedWallShelfWall = selectedWallShelf
+    ? (getProjectWalls(project).find((wall) => wall.id === selectedWallShelf.wallId) ?? null)
+    : null;
+  const wallShelfCenterTarget =
+    selectedWallShelf && selectedWallShelfWall
+      ? getWallPlacementCenterTarget(
+          selectedWallShelf as unknown as ArtworkWallObject,
+          project.wallObjects,
+          selectedWallShelfWall.lengthMm,
+          partitionNeighborShimsForWall(selectedWallShelf.wallId)
+        )
+      : { xMm: 0, boundaryKind: "wall" as const };
 
   // Deleted wall-text selections resolve to null.
   const selectedWallText: WallTextWallObject | null = selectedWallTextId
@@ -577,7 +624,9 @@ export function InspectorPane({
             ? "Wall text"
             : wallObject.kind === "case"
               ? "Display case" // TODO(case-ui): dedicated label source
-              : getOpeningKindLabel(wallObject.kind)
+              : wallObject.kind === "shelf"
+                ? "Shelf"
+                : getOpeningKindLabel(wallObject.kind)
           : undefined;
     return { ...warning, subject };
   });
@@ -600,6 +649,7 @@ export function InspectorPane({
               selectedFloorBlockedZone ||
               selectedFloorCase ||
               selectedWallCase ||
+              selectedWallShelf ||
               selectedRoomPlacement ||
               selectedFreestandingWall ||
               selectedWall) ? (
@@ -613,6 +663,8 @@ export function InspectorPane({
                         ? getOpeningKindLabel(selectedFloorBlockedZone.kind)
                         : selectedFloorCase || selectedWallCase
                           ? "Display case"
+                          : selectedWallShelf
+                          ? "Shelf"
                           : selectedRoomPlacement
                             ? selectedRoomPlacement.room.name
                             : selectedFreestandingWall
@@ -626,7 +678,7 @@ export function InspectorPane({
                         ? "Floor object"
                         : selectedFloorCase
                           ? "Floor object"
-                          : selectedWallCase
+                          : selectedWallCase || selectedWallShelf
                             ? "Wall object"
                             : selectedRoomPlacement
                               ? "Room"
@@ -648,6 +700,7 @@ export function InspectorPane({
                 placedWallObject?.id ??
                 selectedOpening?.id ??
                 selectedWallCase?.id ??
+                selectedWallShelf?.id ??
                 selectedWallText?.id ??
                 null
               }
@@ -774,25 +827,70 @@ export function InspectorPane({
                 }
                 placementSection={
                   placedWallObject && placedWallObjectWall ? (
-                    <WallPlacementFields
-                      placement={placedWallObjectFootprint ?? placedWallObject}
-                      wallLengthMm={placedWallObjectWall.lengthMm}
-                      leftNeighborRightEdgeMm={wallPlacementNeighbors.leftNeighborRightEdgeMm}
-                      rightNeighborLeftEdgeMm={wallPlacementNeighbors.rightNeighborLeftEdgeMm}
-                      leftNeighborIsPartition={wallPlacementNeighbors.leftNeighborIsPartition}
-                      rightNeighborIsPartition={wallPlacementNeighbors.rightNeighborIsPartition}
-                      centerTargetXMm={wallPlacementCenterTarget.xMm}
-                      centerBoundaryKind={wallPlacementCenterTarget.boundaryKind}
-                      unit={project.unit}
-                      onCommit={(xMm, yMm) =>
-                        void moveArtworkPlacement(
-                          placedWallObject.id,
-                          xMm,
-                          yMm,
-                          allowOverlappingPlacement
-                        )
-                      }
-                    />
+                    <>
+                      <WallPlacementFields
+                        placement={placedWallObjectFootprint ?? placedWallObject}
+                        wallLengthMm={placedWallObjectWall.lengthMm}
+                        leftNeighborRightEdgeMm={wallPlacementNeighbors.leftNeighborRightEdgeMm}
+                        rightNeighborLeftEdgeMm={wallPlacementNeighbors.rightNeighborLeftEdgeMm}
+                        leftNeighborIsPartition={wallPlacementNeighbors.leftNeighborIsPartition}
+                        rightNeighborIsPartition={wallPlacementNeighbors.rightNeighborIsPartition}
+                        centerTargetXMm={wallPlacementCenterTarget.xMm}
+                        centerBoundaryKind={wallPlacementCenterTarget.boundaryKind}
+                        unit={project.unit}
+                        onCommit={(xMm, yMm) =>
+                          void moveArtworkPlacement(
+                            placedWallObject.id,
+                            xMm,
+                            yMm,
+                            allowOverlappingPlacement
+                          )
+                        }
+                      />
+                      {/* What does this work rest on? A shelf is the one piece
+                          of furniture a work asks for by name, and asking from
+                          the work is what lets the slab be sized and seated
+                          from it (see addShelfUnderWallArtwork). It lands under
+                          THIS work's bottom edge with both selected, so the
+                          next drag moves the pair together. Once a shelf is
+                          standing under the work, the row becomes a way back to
+                          it — "Select shelf" reaches the relationship from
+                          either end. */}
+                      <InspectorSummaryRow
+                        label="Support"
+                        value={standingShelf ? "Shelf" : "Hung on the wall"}
+                        action={
+                          standingShelf ? (
+                            <Button
+                              className="inspector-action"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => selectOpening(standingShelf.id)}
+                            >
+                              Select shelf
+                            </Button>
+                          ) : (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  className="inspector-action"
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => void addShelfUnderWallArtwork(placedWallObject.id)}
+                                >
+                                  <ShelfGlyph aria-hidden="true" size={14} />
+                                  Add shelf
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom">
+                                Puts a shelf under this work and stands it on it.
+                                Drag the work away to hang it again.
+                              </TooltipContent>
+                            </Tooltip>
+                          )
+                        }
+                      />
+                    </>
                   ) : placedFloorArtwork ? (
                     <>
                       <FloorPlacementFields
@@ -1006,6 +1104,42 @@ export function InspectorPane({
               }
               onDelete={() => void removePlacement(selectedWallCase.id)}
             />
+          ) : selectedWallShelf ? (
+            <ShelfInspector
+              shelf={selectedWallShelf}
+              riderCount={
+                getShelfRiders(selectedWallShelf, project.wallObjects, artworksById).length
+              }
+              onSelectRiders={() =>
+                setObjectSelection(
+                  getShelfRiders(selectedWallShelf, project.wallObjects, artworksById).map(
+                    (rider) => rider.id
+                  )
+                )
+              }
+              wallLengthMm={selectedWallShelfWall?.lengthMm ?? 0}
+              centerTargetXMm={wallShelfCenterTarget.xMm}
+              centerBoundaryKind={wallShelfCenterTarget.boundaryKind}
+              unit={project.unit}
+              onCommitPosition={(xMm, yMm) =>
+                void updateShelf(selectedWallShelf.id, { xMm, yMm })
+              }
+              // heightMm IS the slab's thickness; the store keeps the TOP fixed
+              // when it changes and recomputes yMm beneath it.
+              onCommitSize={(widthMm, thicknessMm, depthMm) =>
+                void updateShelf(selectedWallShelf.id, {
+                  widthMm,
+                  heightMm: thicknessMm,
+                  depthMm
+                })
+              }
+              onCommitTop={(topMm) =>
+                void updateShelf(selectedWallShelf.id, {
+                  yMm: shelfCenterYMmForTop(topMm, selectedWallShelf.heightMm)
+                })
+              }
+              onDelete={() => void removePlacement(selectedWallShelf.id)}
+            />
           ) : selectedOpening ? (
             <OpeningInspector
               opening={selectedOpening}
@@ -1113,6 +1247,7 @@ export function InspectorPane({
               }}
               onAddCase={() => void addWallCase(selectedWall.id)}
               onAddOpening={(kind) => void addOpening(selectedWall.id, kind)}
+              onAddShelf={() => void addOpening(selectedWall.id, "shelf")}
               onCommitHeight={(heightMm) =>
                 selectedWallRoomPlacement
                   ? resizeRoomHeight(selectedWallRoomPlacement.roomId, heightMm)

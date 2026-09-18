@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import {
   afterAll,
   afterEach,
@@ -242,6 +242,97 @@ describe("App shell", () => {
     fireEvent.keyDown(window, { key: "g" });
 
     expect(grid.getAttribute("aria-pressed")).toBe(pressedAfterToggle);
+
+    expectNoReactErrors();
+  });
+
+  // InspectorPane has no test file of its own, so the shelf branch of its
+  // selection switch is proved here: a selected shelf must reach ShelfInspector,
+  // not fall through to the generic opening inspector.
+  it("renders the shelf inspector when a shelf is selected", async () => {
+    await renderApp();
+
+    const { useAppStore } = await import("./store");
+    const { getProjectWalls } = await import("./projectWalls");
+    const wallId = getProjectWalls(useAppStore.getState().project!)[0]!.id;
+
+    // Driven through the store rather than the toolbar: this case is about the
+    // inspector branch, and act() keeps the two store writes inside one render
+    // pass so the shell settles before the assertions.
+    await act(async () => {
+      await useAppStore.getState().addOpening(wallId, "shelf");
+      const shelf = useAppStore
+        .getState()
+        .project!.wallObjects.find((object) => object.kind === "shelf")!;
+      useAppStore.getState().setObjectSelection([shelf.id]);
+    });
+
+    // "Top height" and "Delete shelf" exist only in ShelfInspector; the wall
+    // case beside it has "Height" and "Delete case".
+    expect(await screen.findByLabelText("Top height")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete shelf" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Thickness")).toBeInTheDocument();
+
+    expectNoReactErrors();
+  });
+
+  // The wall-work inspector's Support row: what a work rests on, and the way
+  // back to it. Also not covered by its own test file — same reason as above.
+  it("shows the Support row on a wall work and reaches its shelf from either end", async () => {
+    await renderApp();
+
+    const { useAppStore } = await import("./store");
+    const { getProjectWalls } = await import("./projectWalls");
+    const { CURRENT_SCHEMA_VERSION } = await import("../domain/project");
+    const wallId = getProjectWalls(useAppStore.getState().project!)[0]!.id;
+
+    await act(async () => {
+      useAppStore.setState({
+        libraryArtworks: [
+          {
+            id: "support-row-artwork",
+            schemaVersion: CURRENT_SCHEMA_VERSION,
+            title: "Test work",
+            dimensions: { widthMm: 600, heightMm: 800, status: "known" },
+            metadata: {}
+          }
+        ],
+        project: {
+          ...useAppStore.getState().project!,
+          wallObjects: [
+            {
+              id: "support-row-placement",
+              wallId,
+              kind: "artwork",
+              artworkId: "support-row-artwork",
+              xMm: 1500,
+              yMm: 1500,
+              widthMm: 600,
+              heightMm: 800
+            }
+          ]
+        }
+      });
+      useAppStore.getState().setObjectSelection(["support-row-placement"]);
+    });
+
+    expect(await screen.findByText("Support")).toBeInTheDocument();
+    expect(screen.getByText("Hung on the wall")).toBeInTheDocument();
+
+    await act(async () => {
+      await useAppStore.getState().addShelfUnderWallArtwork("support-row-placement");
+      // addShelfUnderWallArtwork selects the work AND its new shelf; the
+      // Support row only renders for a single-artwork selection.
+      useAppStore.getState().setObjectSelection(["support-row-placement"]);
+    });
+
+    expect(await screen.findByText("Shelf")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Select shelf" }));
+
+    const shelfId = useAppStore
+      .getState()
+      .project!.wallObjects.find((object) => object.kind === "shelf")!.id;
+    expect(useAppStore.getState().selection).toEqual({ kind: "objects", ids: [shelfId] });
 
     expectNoReactErrors();
   });

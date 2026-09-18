@@ -6,6 +6,7 @@ import {
   quantizeYToCleanIncrement
 } from "../../domain/snapping/cleanIncrement";
 import { withArtworkFootprintFromMap } from "../../domain/framing";
+import { expandWithShelfRiders } from "../../domain/placement/shelfRiders";
 import type { Artwork, Project, WallObject } from "../../domain/project";
 import { unitSystemFromDisplayUnit } from "../../domain/units/unitSystem";
 import { getProjectWalls, type ArrangeSession, type ViewMode } from "../store";
@@ -40,6 +41,15 @@ export type UseArrangeNudgeShortcutsParams = {
     yMm: number,
     allowOverlap?: boolean
   ) => Promise<unknown>;
+  // One batched commit for a set of wall objects — the shelf branch's commit
+  // path. Deliberately NOT the arrange session: a shelf assembly is a rigid
+  // body the curator is moving, not a spacing proposal to preview and Apply,
+  // and the session moves artwork members only (a shelf would sit still while
+  // its works slid off it).
+  moveWallObjectsGroup: (
+    moves: { id: string; xMm: number; yMm: number }[],
+    allowOverlap?: boolean
+  ) => Promise<void>;
 };
 
 // Arrange keyboard shortcuts: Enter commits a live arrange session, and arrow
@@ -67,7 +77,8 @@ export function useArrangeNudgeShortcuts({
   setArrangeSessionPreview,
   commitArrangeSession,
   moveArtworkPlacement,
-  moveOpening
+  moveOpening,
+  moveWallObjectsGroup
 }: UseArrangeNudgeShortcutsParams) {
   useEffect(() => {
     const artworksById = new Map(artworks.map((artwork) => [artwork.id, artwork]));
@@ -161,6 +172,97 @@ export function useArrangeNudgeShortcuts({
       const dyMm =
         event.key === "ArrowUp" ? stepMm : event.key === "ArrowDown" ? -stepMm : 0;
 
+      // The clean-increment delta for a set of members moved as ONE virtual
+      // object (its union box): quantize the box's center, then hand every
+      // member the SAME delta, so a rigid group lands on a clean measurement
+      // without disturbing its interior spacing. Shared by the shelf-assembly
+      // branch and the multi-selection arrange path below — the two must agree,
+      // since both are "a rigid set of wall objects nudged one step".
+      function groupNudgeDeltaMm(
+        footprintMembers: WallObject[],
+        memberIds: Set<string>,
+        wallId: string
+      ): { deltaXMm: number; deltaYMm: number } {
+        const box = getGroupBounds(footprintMembers);
+        let centerXMm = box.centerXMm + dxMm;
+        let centerYMm = box.centerYMm + dyMm;
+        if (useQuantize && project) {
+          const wall = getProjectWalls(project).find((candidate) => candidate.id === wallId);
+          if (wall) {
+            const size = { widthMm: box.widthMm, heightMm: box.heightMm };
+            const neighbors = project.wallObjects
+              .filter((object) => object.wallId === wallId && !memberIds.has(object.id))
+              .map(withResolvedArtworkFootprint);
+            if (dxMm !== 0) {
+              centerXMm = quantizeXToCleanIncrement(
+                { xMm: centerXMm, yMm: centerYMm },
+                size,
+                incrementMm,
+                wall.lengthMm,
+                neighbors
+              );
+            }
+            if (dyMm !== 0) {
+              centerYMm = quantizeYToCleanIncrement(
+                { xMm: centerXMm, yMm: centerYMm },
+                size,
+                incrementMm
+              );
+            }
+          }
+        }
+        return {
+          deltaXMm: centerXMm - box.centerXMm,
+          deltaYMm: centerYMm - box.centerYMm
+        };
+      }
+
+      // A selection containing a SHELF is a rigid assembly, and it is the one
+      // wall selection that bypasses both branches below: the single path would
+      // send a lone shelf through moveOpening and leave the works standing on
+      // it behind, and the multi-selection path opens an arrange session that
+      // moves ARTWORK members only — the shelf would hold still while its works
+      // slid off it. Instead the shelf's riders are derived (shelfRiders.ts),
+      // the whole set takes one common delta, and one moveWallObjectsGroup call
+      // per press keeps it to one undo entry.
+      //
+      // 3D declines, like every other non-single-artwork case: the arrows stay
+      // with the camera, and WallShelfMesh installs no drag either (shelves are
+      // selectable-but-not-draggable in 3D this round).
+      if (selectedWallObjects.some((member) => member.kind === "shelf")) {
+        if (inThreeD) return;
+        const wallId = selectedWallObjects[0]!.wallId;
+        if (!selectedWallObjects.every((member) => member.wallId === wallId)) return;
+
+        // Riders are same-wall by construction, so the expanded set never
+        // crosses the wall the guard above just established.
+        const movingIds = new Set(
+          expandWithShelfRiders(selectedObjectIds, project.wallObjects, artworksById)
+        );
+        const members = project.wallObjects.filter((object) => movingIds.has(object.id));
+
+        event.preventDefault();
+        event.stopPropagation();
+        // Same reasoning as the single-placement branch below: once this press
+        // is a nudge, KeyboardTravel must not also read it.
+        event.stopImmediatePropagation();
+
+        const { deltaXMm, deltaYMm } = groupNudgeDeltaMm(
+          members.map(withResolvedArtworkFootprint),
+          movingIds,
+          wallId
+        );
+        void moveWallObjectsGroup(
+          members.map((member) => ({
+            id: member.id,
+            xMm: member.xMm + deltaXMm,
+            yMm: member.yMm + deltaYMm
+          })),
+          allowOverlappingPlacement
+        );
+        return;
+      }
+
       // A single selected placement nudges directly, one store commit per press
       // (per-press undo entries — deliberately NOT an arrange session: its
       // guards need 2+ artwork members, and an invisible single-work session
@@ -248,33 +350,11 @@ export function useArrangeNudgeShortcuts({
       // Quantize the group as ONE virtual object (its union box) and apply the
       // resulting common delta to every member, so the rigid group lands on a
       // clean measurement without disturbing interior spacing.
-      const box = getGroupBounds(footprintBased);
-      let centerXMm = box.centerXMm + dxMm;
-      let centerYMm = box.centerYMm + dyMm;
-      if (useQuantize) {
-        const wall = getProjectWalls(project).find((candidate) => candidate.id === members[0].wallId);
-        if (wall) {
-          const size = { widthMm: box.widthMm, heightMm: box.heightMm };
-          const memberIds = new Set(members.map((member) => member.id));
-          const neighbors = project.wallObjects.filter(
-            (object) => object.wallId === members[0].wallId && !memberIds.has(object.id)
-          ).map(withResolvedArtworkFootprint);
-          if (dxMm !== 0) {
-            centerXMm = quantizeXToCleanIncrement(
-              { xMm: centerXMm, yMm: centerYMm },
-              size,
-              incrementMm,
-              wall.lengthMm,
-              neighbors
-            );
-          }
-          if (dyMm !== 0) {
-            centerYMm = quantizeYToCleanIncrement({ xMm: centerXMm, yMm: centerYMm }, size, incrementMm);
-          }
-        }
-      }
-      const deltaXMm = centerXMm - box.centerXMm;
-      const deltaYMm = centerYMm - box.centerYMm;
+      const { deltaXMm, deltaYMm } = groupNudgeDeltaMm(
+        footprintBased,
+        new Set(members.map((member) => member.id)),
+        members[0].wallId
+      );
       const moves = based.map((member) => ({
         id: member.id,
         xMm: member.xMm + deltaXMm,
@@ -305,6 +385,7 @@ export function useArrangeNudgeShortcuts({
     setArrangeSessionPreview,
     commitArrangeSession,
     moveArtworkPlacement,
-    moveOpening
+    moveOpening,
+    moveWallObjectsGroup
   ]);
 }

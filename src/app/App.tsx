@@ -567,7 +567,8 @@ export function App() {
     setArrangeSessionPreview,
     commitArrangeSession,
     moveArtworkPlacement,
-    moveOpening
+    moveOpening,
+    moveWallObjectsGroup
   });
 
   useToolbarShortcuts({
@@ -1282,8 +1283,8 @@ export function App() {
                 onCommitPlanMove={(objectId, placement) =>
                   void commitPlanMove(objectId, placement, allowOverlappingPlacement)
                 }
-                onPlaceArtwork={(artworkId, wallId, xMm, yMm) =>
-                  void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement)
+                onPlaceArtwork={(artworkId, wallId, xMm, yMm, seatOnShelfId) =>
+                  void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement, { seatOnShelfId })
                 }
                 onPlaceArtworkOnFloor={(artworkId, xMm, yMm) =>
                   void placeArtworkOnFloor(artworkId, xMm, yMm)
@@ -1377,8 +1378,8 @@ export function App() {
                     }
                     void moveArtworkPlacement(wallObjectId, xMm, yMm, allowOverlappingPlacement);
                   }}
-                  onPlaceArtwork={(artworkId, wallId, xMm, yMm) =>
-                    void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement)
+                  onPlaceArtwork={(artworkId, wallId, xMm, yMm, seatOnShelfId) =>
+                    void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement, { seatOnShelfId })
                   }
                   selectedObjectIds={selectedObjectIds}
                   onMoveWallObjects={(moves) => {
@@ -1471,8 +1472,8 @@ export function App() {
                 onSelectObject={selectObject}
                 onClearSelection={clearObjectSelection}
                 draggingArtworkId={draggingArtworkId}
-                onPlaceArtwork={(artworkId, wallId, xMm, yMm) =>
-                  void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement)
+                onPlaceArtwork={(artworkId, wallId, xMm, yMm, seatOnShelfId) =>
+                  void placeArtwork(artworkId, wallId, xMm, yMm, allowOverlappingPlacement, { seatOnShelfId })
                 }
                 onPlaceArtworkOnFloor={(artworkId, xMm, yMm) =>
                   void placeArtworkOnFloor(artworkId, xMm, yMm)

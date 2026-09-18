@@ -82,6 +82,24 @@ describe("useToolbarShortcuts", () => {
     expect(elevation.armOpeningTool).not.toHaveBeenCalled();
   });
 
+  // L, not S: S is snap-to-grid. And unlike the case, a shelf is offered on
+  // BOTH 2D surfaces — it is wall-only, and elevation is a wall.
+  it("arms the Shelf tool on L in plan and in elevation, leaving S as snap-to-grid", () => {
+    const plan = renderHarness({ viewMode: "plan" });
+    press("l");
+    expect(plan.armOpeningTool).toHaveBeenCalledWith("shelf");
+    expect(plan.toggleSnapToGrid).not.toHaveBeenCalled();
+
+    const elevation = renderHarness({ viewMode: "elevation" });
+    press("l");
+    expect(elevation.armOpeningTool).toHaveBeenCalledWith("shelf");
+
+    const snap = renderHarness();
+    press("s");
+    expect(snap.armOpeningTool).not.toHaveBeenCalled();
+    expect(snap.toggleSnapToGrid).toHaveBeenCalledTimes(1);
+  });
+
   it("toggles the view options in both 2D views", () => {
     const plan = renderHarness({ viewMode: "plan" });
     press("g");

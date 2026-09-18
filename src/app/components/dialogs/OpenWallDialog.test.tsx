@@ -13,6 +13,7 @@ function summary(over: Partial<WallContentsSummary> = {}): WallContentsSummary {
     blockedZones: 0,
     wallTexts: 0,
     cases: 0,
+    shelves: 0,
     measurements: 0,
     isEmpty: true,
     ...over
@@ -24,6 +25,7 @@ function summary(over: Partial<WallContentsSummary> = {}): WallContentsSummary {
       base.blockedZones +
       base.wallTexts +
       base.cases +
+      base.shelves +
       base.measurements ===
     0;
   return base;

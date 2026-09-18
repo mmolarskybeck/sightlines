@@ -157,10 +157,10 @@ export function effectiveWallArtworkDepthMm(
 // and the group paths simply forgot, collapsing a real vitrine to the thin
 // nominal band the moment it was dragged as part of a selection.
 //
-// Cases and deep artwork protrude their real depth; everything else (doors,
-// windows, blocked zones, wall text, and flat works) keeps the fixed nominal
-// band — those pass THROUGH the wall or lie flat on it and have no protrusion to
-// draw (see WALL_OBJECT_PLAN_DEPTH_MM).
+// Cases, SHELVES and deep artwork protrude their real depth; everything else
+// (doors, windows, blocked zones, wall text, and flat works) keeps the fixed
+// nominal band — those pass THROUGH the wall or lie flat on it and have no
+// protrusion to draw (see WALL_OBJECT_PLAN_DEPTH_MM).
 //
 // `artwork` is consulted only for the artwork kind; callers that already know
 // the object is something else may pass undefined.
@@ -168,7 +168,9 @@ export function effectiveWallObjectPlanDepthMm(
   object: WallObject,
   artwork: Pick<Artwork, "dimensions"> | undefined
 ): number {
-  if (object.kind === "case") return object.depthMm;
+  // A shelf and a case are the same physical situation — a body cantilevered
+  // into the room — and carry the same stored field, so they share one branch.
+  if (object.kind === "case" || object.kind === "shelf") return object.depthMm;
   if (object.kind === "artwork") {
     return effectiveWallArtworkDepthMm(object, artwork) ?? WALL_OBJECT_PLAN_DEPTH_MM;
   }

@@ -161,6 +161,14 @@ function elevationGroups(inputMode: HelpInputMode, mod: string): HelpGroup[] {
           action: "Select several",
           inputs: [[t("drag the wall background")], [k("⇧"), t("keeps existing")]]
         },
+        // The shelf gesture teaches itself only once you know it exists: the
+        // capture band is deliberately narrow, so a work dropped near a slab
+        // hangs on the wall instead, and nothing on the canvas says otherwise.
+        { action: "Stand a work on a shelf", inputs: [[t("drag it over the shelf")]] },
+        // The precision bypass (useElevationMoveDrag's precisionBypass) is the
+        // way OUT of every snap, including the shelf; it is documented nowhere
+        // else in the UI.
+        { action: "Move freely, ignoring snaps", inputs: [[k(mod), t("drag an object")]] },
         { action: "Switch walls", inputs: [[t("chevrons on the wall label")]] }
       ]
     },

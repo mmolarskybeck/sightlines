@@ -64,6 +64,19 @@ export function WindowGlyph(props: GlyphProps) {
   );
 }
 
+// A wall shelf seen from the side: a solid slab bracketed off a wall line, with
+// the wall as the vertical stroke on the left. Filled like the partition's bar
+// (it is timber, not glass) but read against a wall, which is what keeps it
+// distinct from the display case's legged box at 16px.
+export function ShelfGlyph(props: GlyphProps) {
+  return (
+    <Glyph {...props}>
+      <line x1="2.75" y1="2" x2="2.75" y2="14" />
+      <rect x="2.75" y="6.75" width="10.5" height="2.5" fill="currentColor" stroke="none" />
+    </Glyph>
+  );
+}
+
 // A display case (vitrine): a glass box on thin legs, so it reads as a
 // freestanding case distinct from the blocked zone's dashed rectangle and the
 // window's mullioned pane.

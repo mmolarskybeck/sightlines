@@ -10,6 +10,7 @@ import type {
   CaseWallObject,
   DoorWallObject,
   Project,
+  ShelfWallObject,
   WindowWallObject
 } from "../project";
 import { createSampleProject } from "../sample/sampleProject";
@@ -375,6 +376,37 @@ describe("buildPlanScene wall objects", () => {
     );
     expect(shiftMm).toBeCloseTo(225, 6);
   });
+
+  it("emits a shelf with its real protrusion depth, offset flush to the viewer side", () => {
+    const project = createSampleProject();
+    const shelf: ShelfWallObject = {
+      id: "wo-shelf",
+      kind: "shelf",
+      wallId: "wall-north",
+      xMm: 2000,
+      yMm: 1180,
+      widthMm: 1200,
+      heightMm: 40,
+      depthMm: 300
+    };
+    project.wallObjects.push(shelf);
+
+    const scene = buildPlanScene(project);
+    const entry = scene.wallObjects.find((candidate) => candidate.object.id === "wo-shelf")!;
+
+    // The shelf's own protrusion, not WALL_OBJECT_PLAN_DEPTH_MM.
+    expect(entry.restRect.widthMm).toBe(1200);
+    expect(entry.restRect.depthMm).toBe(300);
+    // And shifted off the wall-centered anchor by half the protrusion, exactly
+    // like a wall case: the slab is cantilevered INTO the room, not through
+    // the wall.
+    expect(entry.renderedRect.widthMm).toBe(1200);
+    const shiftMm = Math.hypot(
+      entry.renderedRect.centerXMm - entry.restRect.centerXMm,
+      entry.renderedRect.centerYMm - entry.restRect.centerYMm
+    );
+    expect(shiftMm).toBeCloseTo(150, 6);
+  });
 });
 
 describe("buildPlanScene door swing", () => {
@@ -671,11 +703,17 @@ describe("planScenePaintOrder", () => {
   const wall = (id: string, kind: string) => ({ object: { id, kind } });
   const floor = (id: string, kind: string) => ({ object: { id, kind } });
 
-  it("paints cases first across both groups, then everything else", () => {
+  it("paints cases and shelves first across both groups, then everything else", () => {
     // Stored order deliberately interleaves: an artwork stored BEFORE the
     // case it overlaps must still paint after it (the artwork hangs above
-    // the case's glass top, so its rect covers the case seen from above).
-    const wallObjects = [wall("art-1", "artwork"), wall("case-w", "case"), wall("door-1", "door")];
+    // the case's glass top, so its rect covers the case seen from above) —
+    // and a work STANDING ON a shelf covers the slab the same way.
+    const wallObjects = [
+      wall("art-1", "artwork"),
+      wall("case-w", "case"),
+      wall("shelf-w", "shelf"),
+      wall("door-1", "door")
+    ];
     const floorObjects = [floor("ped-1", "pedestal"), floor("case-f", "case")];
 
     const order = planScenePaintOrder(wallObjects, floorObjects).map(
@@ -684,6 +722,7 @@ describe("planScenePaintOrder", () => {
 
     expect(order).toEqual([
       "wall:case-w",
+      "wall:shelf-w",
       "floor:case-f",
       "wall:art-1",
       "wall:door-1",

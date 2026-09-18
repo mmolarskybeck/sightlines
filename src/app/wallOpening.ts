@@ -38,6 +38,7 @@ export type WallContentsSummary = {
   blockedZones: number;
   wallTexts: number;
   cases: number;
+  shelves: number;
   measurements: number;
   isEmpty: boolean;
 };
@@ -90,6 +91,7 @@ export function buildOpenWallRequest(
     blockedZones: 0,
     wallTexts: 0,
     cases: 0,
+    shelves: 0,
     measurements: scope.removedMeasurementIds.size,
     isEmpty: true
   };
@@ -113,6 +115,10 @@ export function buildOpenWallRequest(
     else if (wallObject.kind === "blocked-zone") summary.blockedZones += 1;
     else if (wallObject.kind === "wall-text") summary.wallTexts += 1;
     else if (wallObject.kind === "case") summary.cases += 1;
+    // A shelf counts as furniture, not as a work: the works STANDING on it are
+    // counted separately above (they go back on the checklist), while the slab
+    // itself is deleted with the rest of the fixtures.
+    else if (wallObject.kind === "shelf") summary.shelves += 1;
   }
 
   summary.isEmpty =
@@ -122,6 +128,7 @@ export function buildOpenWallRequest(
       summary.blockedZones +
       summary.wallTexts +
       summary.cases +
+      summary.shelves +
       summary.measurements ===
     0;
 
@@ -161,6 +168,7 @@ export function describeWallContents(summary: WallContentsSummary): string {
     summary.blockedZones +
     summary.wallTexts +
     summary.cases +
+    summary.shelves +
     summary.measurements;
 
   if (summary.artworks === 0) {

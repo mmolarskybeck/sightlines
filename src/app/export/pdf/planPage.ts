@@ -5,6 +5,7 @@ import {
   casePlanGlyph,
   wallTextPlanGlyph
 } from "../../../domain/geometry/caseGlyphs";
+import { shelfPlanGlyph } from "../../../domain/geometry/shelfGlyphs";
 import {
   isMonitorArtwork,
   monitorPlanGlyph
@@ -141,7 +142,7 @@ function drawPlanObject(
   page: PDFPage,
   transform: PlanTransform,
   rect: PlanRect,
-  kind: "artwork" | "door" | "window" | "blocked-zone" | "wall-text" | "case",
+  kind: "artwork" | "door" | "window" | "blocked-zone" | "wall-text" | "case" | "shelf",
   isFloorPlaced: boolean,
   // This artwork is displayed on a CRT / box monitor — the same flag the canvas
   // passes to PlanObject, and for the same reason it isn't a `kind` there.
@@ -298,6 +299,24 @@ function drawPlanObject(
       ];
       page.drawSvgPath(polygonPath(legCorners), { color: COLORS.subtle });
     }
+  } else if (kind === "shelf") {
+    // A wall shelf, top-down: the protruding slab, FILLED. Straight off the
+    // shared glyph module (shelfGlyphs.ts), which says the outline is the whole
+    // glyph — a shelf has no inner construction, and what distinguishes it from
+    // the hollow rects around it is that it is solid. Same fill token the SVG
+    // canvas and the preview card use, so print and screen read alike.
+    const { outline } = shelfPlanGlyph({ widthMm: rect.widthMm, depthMm: rect.depthMm });
+    const slabCorners = [
+      world(outline.x0Mm, outline.y0Mm),
+      world(outline.x1Mm, outline.y0Mm),
+      world(outline.x1Mm, outline.y1Mm),
+      world(outline.x0Mm, outline.y1Mm)
+    ];
+    page.drawSvgPath(polygonPath(slabCorners), {
+      color: COLORS.surfaceStrong,
+      borderColor: COLORS.subtle,
+      borderWidth: 0.5
+    });
   } else {
     for (const x of [-halfW, 0, halfW]) {
       drawLine(

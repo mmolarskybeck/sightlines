@@ -13,6 +13,7 @@ import type {
 import { getPlacementFootprintMm } from "../framing";
 import type { FloorPartition } from "../geometry/freestandingWalls";
 import { isMonitorArtwork } from "../geometry/monitorGlyphs";
+import { shelfElevationGlyph } from "../geometry/shelfGlyphs";
 import {
   assemblyPlanRect,
   resolveFloorSupport,
@@ -133,6 +134,23 @@ export type ElevationSceneCase = {
   centerMm: ArtworkCenterMm;
   sizeMm: ArtworkSizeMm;
   outOfBounds: boolean;
+};
+
+// A wall shelf in elevation: the slab band. Deliberately NOT shaped like the
+// case/opening entries above — a shelf is drawn as a horizontal band spanning
+// two wall-local x's at one height, not as a centre + size box, and giving the
+// entry the span directly is what lets a painter draw it (and a dimension
+// chain read it) without re-deriving the centre arithmetic. `yMm` is the
+// slab's CENTRE height and `heightMm` its thickness, exactly as stored (see
+// ShelfWallObject); `depthMm` is its protrusion, carried so an elevation
+// surface can label the shelf without a second lookup.
+export type ElevationSceneShelf = {
+  objectId: string;
+  xMinMm: number;
+  xMaxMm: number;
+  yMm: number;
+  heightMm: number;
+  depthMm: number;
 };
 
 // The elevation "shadow" of a FLOOR case standing in front of this wall: its
@@ -502,6 +520,8 @@ export type ElevationScene = {
   openings: ElevationSceneOpening[];
   wallTexts: ElevationSceneWallText[];
   cases: ElevationSceneCase[];
+  // Wall shelves on this wall, as slab bands (see ElevationSceneShelf).
+  shelves: ElevationSceneShelf[];
   // Floor cases standing in front of this wall, projected onto its along-axis.
   // Empty unless the caller supplies floorCases + the wall's floor-space
   // endpoints in the options.
@@ -576,6 +596,7 @@ export function buildElevationScene(
   const openings: ElevationSceneOpening[] = [];
   const wallTexts: ElevationSceneWallText[] = [];
   const cases: ElevationSceneCase[] = [];
+  const shelves: ElevationSceneShelf[] = [];
 
   // One pass, split by kind — preserving each kind's stored order (the view
   // paints artworks then openings then wall texts, so relative paint order
@@ -617,6 +638,19 @@ export function buildElevationScene(
         sizeMm
       );
       cases.push({ object, centerMm, sizeMm, outOfBounds });
+    } else if (object.kind === "shelf") {
+      // The band's span comes from the shared glyph module, so the elevation
+      // canvas, the PDF page and the 3D slab can never disagree about where a
+      // shelf's ends and its top face are.
+      const glyph = shelfElevationGlyph(object);
+      shelves.push({
+        objectId: object.id,
+        xMinMm: glyph.xMinMm,
+        xMaxMm: glyph.xMaxMm,
+        yMm: object.yMm,
+        heightMm: object.heightMm,
+        depthMm: object.depthMm
+      });
     } else {
       const outOfBounds = isArtworkOutOfWallBounds(
         wallLengthMm,
@@ -792,6 +826,7 @@ export function buildElevationScene(
     openings,
     wallTexts,
     cases,
+    shelves,
     floorCaseGhosts,
     suspendedArtworkGhosts,
     supportedArtworkGhosts,

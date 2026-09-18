@@ -125,6 +125,24 @@ describe("SelectionInspector arrange body", () => {
     ).toBeTruthy();
   });
 
+  // A shelf is a wall object like any other boundary the detector can land on,
+  // so it has to name itself rather than falling through the noun switch.
+  it("inset/left, a neighbouring shelf: field label and caption name the shelf", () => {
+    renderPanel({
+      arrange: {
+        ...baseArrange,
+        insetAnchor: "left",
+        leftBoundary: { type: "object", kind: "shelf", name: "Shelf" },
+        rightBoundary: { type: "wall" }
+      }
+    });
+
+    expect(
+      screen.getByRole("textbox", { name: "Distance from Shelf on the left" })
+    ).toBeTruthy();
+    expect(screen.getByText("Measuring to nearest shelf on the left.")).toBeTruthy();
+  });
+
   it("equal mode: zone select and equal-distance readout, no anchor tabs", () => {
     renderPanel({ arrange: { ...baseArrange, mode: "equal" } });
 
