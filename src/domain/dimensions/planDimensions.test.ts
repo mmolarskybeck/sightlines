@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FloorPartition } from "../geometry/freestandingWalls";
 import type { FloorWall } from "../geometry/planObjects";
-import type { PlanRect } from "../geometry/planObjects";
 import {
   derivePlanFloorGaps,
   derivePlanSceneGaps,

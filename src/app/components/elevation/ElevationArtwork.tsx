@@ -12,7 +12,7 @@ import {
   MAT_FILL_HEX,
   getArtworkRingRectsMm
 } from "../../../domain/framing";
-import { getArtworkRectSvg, type ArtworkCenterMm, type ArtworkSizeMm, type SvgRectMm } from "./elevationArtworkGeometry";
+import { getArtworkRectSvg, type ArtworkCenterMm, type ArtworkSizeMm } from "./elevationArtworkGeometry";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 
 // One placement's visual, reused for both a real (persisted) placement and

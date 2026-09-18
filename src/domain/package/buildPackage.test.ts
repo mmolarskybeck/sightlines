@@ -19,7 +19,7 @@ describe("selectReferencedArtworks", () => {
   });
 
   it("unions checklist membership with placed artworks not on the checklist", () => {
-    const { project, library } = makeFixture();
+    const { project } = makeFixture();
     // A work placed on a wall but missing from checklistArtworkIds still ships.
     project.checklistArtworkIds = ["art-unplaced"];
 

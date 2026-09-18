@@ -12,6 +12,7 @@ import {
   selectBackupFingerprint
 } from "../store/cloudBackupSlice";
 import { readCloudBackupMeta } from "../store/cloudBackupMeta";
+import { readMsEnv } from "./readMsEnv";
 
 // Idle settle after the last change before backing up (~3 min).
 export const CLOUD_BACKUP_SETTLE_MS = readMsEnv(
@@ -25,12 +26,6 @@ export const CLOUD_BACKUP_MIN_INTERVAL_MS = readMsEnv(
 );
 // How often the scheduler re-evaluates the gates.
 const CHECK_INTERVAL_MS = 15_000;
-
-function readMsEnv(raw: string | undefined, fallback: number): number {
-  if (raw === undefined) return fallback;
-  const value = Number(raw);
-  return Number.isFinite(value) && value >= 0 ? value : fallback;
-}
 
 export type ShouldBackupNowInput = {
   connected: boolean;

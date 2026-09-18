@@ -218,7 +218,6 @@ export function generalHelpGroup(inputMode: HelpInputMode, isMac: boolean): Help
       ]
     };
   }
-  const mod = isMac ? "⌘" : "Ctrl";
   return {
     title: "Everywhere",
     hints: [

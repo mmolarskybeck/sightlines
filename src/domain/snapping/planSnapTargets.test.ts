@@ -600,21 +600,6 @@ describe("resolvePlanPlacement — artwork drop converts by drop point", () => {
   });
 });
 
-function caseFloorObject(overrides: Partial<CaseFloorObject> = {}): CaseFloorObject {
-  return {
-    id: "floor-case-1",
-    kind: "case",
-    xMm: 2500,
-    yMm: 1500,
-    widthMm: 500,
-    depthMm: 500,
-    rotationDeg: 0,
-    heightMm: 900,
-    wallYMm: 0,
-    ...overrides
-  };
-}
-
 describe("resolvePlanPlacement — floor stage alignment (Phase 3)", () => {
   // A rectangular room, walls tagged with the same roomId as HORIZONTAL_WALL
   // (south), so all four are picked up as the room by getFloorAlignSnapTargets.

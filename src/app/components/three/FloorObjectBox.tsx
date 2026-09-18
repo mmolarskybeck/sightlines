@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { MathUtils } from "three";
 import type { Texture } from "three";
 import type { FloorObject3d } from "../../../domain/geometry/scene3d";
 import {
@@ -14,6 +13,7 @@ import {
   floorObjectImagePanels,
   resolveFloorObjectImageFaces
 } from "./floorObjectImageFaces";
+import { planRotationToYaw } from "./planRotation";
 import {
   planSuspensionWires,
   suspendedCenterYMm,
@@ -52,21 +52,14 @@ const SELECTION_OUTLINE_OUTSET_MM = 20;
 
 // The bonnet's glass, identical to the vitrine cap's in CaseMesh.tsx: one glass
 // language across the app (the 2D glyphs share CASE_GLASS_THICKNESS_MM for the
-// same reason). Restated locally rather than exported from CaseMesh, exactly as
-// planRotationToYaw below is restated there — neither file should have to import
-// the other's render internals.
+// same reason). Restated locally rather than exported from CaseMesh — neither
+// file should have to import the other's render internals.
 const GLASS_MATERIAL_PROPS = {
   color: CASE_GLASS_COLOR,
   transparent: true,
   opacity: CASE_GLASS_OPACITY,
   depthWrite: false
 } as const;
-
-// Plan-space rotation (CCW in plan x/y) to a three.js yaw about +y: plan y
-// maps to world +z, which flips handedness — the one place that sign lives.
-function planRotationToYaw(rotationDeg: number): number {
-  return -MathUtils.degToRad(rotationDeg);
-}
 
 // Everything the mesh layer needs to stand a work on its support, in mm, in the
 // placement's OWN (yawed) frame — so the whole assembly rides inside the one

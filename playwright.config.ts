@@ -24,6 +24,13 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
+  // Visual baselines are platform-neutral so one committed PNG serves both
+  // macOS (local) and Linux (CI). toHaveScreenshot tolerances below absorb
+  // the font-rasterisation drift between the two.
+  snapshotPathTemplate: "{testDir}/__screenshots__/{testFileName}/{arg}{ext}",
+  expect: {
+    toHaveScreenshot: { maxDiffPixelRatio: 0.02, animations: "disabled", caret: "hide" }
+  },
   reporter: [
     ["list"],
     ["html", { outputFolder: ".playwright-mcp/playwright-report", open: "never" }],

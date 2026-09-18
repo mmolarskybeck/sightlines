@@ -1,3 +1,4 @@
+import { isPositive } from "../../../domain/geometry/isPositive";
 import { DEFAULT_FLOOR_OBJECT_IMAGE_FACES, type FloorObjectFace } from "../../../domain/project";
 import type { SizeMm } from "./artworkFit";
 
@@ -234,8 +235,4 @@ function imagePanelSizeMm(
   }
 
   return faceSize;
-}
-
-function isPositive(value: number | undefined): value is number {
-  return value !== undefined && Number.isFinite(value) && value > 0;
 }

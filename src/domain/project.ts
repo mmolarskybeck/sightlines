@@ -494,9 +494,11 @@ export {
   DEFAULT_WALL_CASE_CENTER_Y_MM
 } from "./geometry/caseGlyphs";
 
-// Editable default depth for floor-placed objects (doors/windows have a
-// fixed nominal wall-object thickness instead; see WALL_OBJECT_PLAN_DEPTH_MM).
-export const DEFAULT_FLOOR_OBJECT_DEPTH_MM = 400;
+// Editable default depth for floor-placed objects lives beside
+// WALL_OBJECT_PLAN_DEPTH_MM in geometry/planObjects.ts so placement/artworkForm
+// can read it without a runtime import of this module (project → monitorGlyphs
+// → artworkForm → project was an import cycle).
+export { DEFAULT_FLOOR_OBJECT_DEPTH_MM } from "./geometry/planObjects";
 
 export type FloorObjectBase = {
   id: string;

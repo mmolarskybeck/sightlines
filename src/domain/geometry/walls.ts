@@ -1,6 +1,15 @@
 import type { Floor, Room, RoomPlacement, RoomVertex, Wall } from "../project";
 import { isPointInPolygon } from "./polygon";
-import { findVertex } from "./wallLoop";
+
+export function findVertex(room: Room, vertexId: string): RoomVertex {
+  const vertex = room.vertices.find((candidate) => candidate.id === vertexId);
+
+  if (!vertex) {
+    throw new Error(`Vertex not found: ${vertexId}`);
+  }
+
+  return vertex;
+}
 
 export type WallWithGeometry = Wall & {
   start: RoomVertex;

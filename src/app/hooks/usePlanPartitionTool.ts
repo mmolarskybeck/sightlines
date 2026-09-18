@@ -23,7 +23,6 @@ import {
 } from "../../domain/snapping/partitionSnapTargets";
 import {
   resolveSnap,
-  type Guide,
   type SnapTarget,
   type SnapTargetIds
 } from "../../domain/snapping/resolveSnap";

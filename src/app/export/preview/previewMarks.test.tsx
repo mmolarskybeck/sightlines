@@ -8,7 +8,9 @@ import { reconcileDocumentExportPreferences } from "../../../domain/export/docum
 import { createSampleProject } from "../../../domain/sample/sampleProject";
 import type { PlanRect } from "../../../domain/geometry/planObjects";
 import type { ElevationScene } from "../../../domain/scene2d/elevationScene";
-import { elevationPageMarks, planObjectMarks, planTransform } from "./ExportPdfPreview";
+import { elevationPageMarks } from "./elevationPageMarks";
+import { planObjectMarks } from "./planPageMarks";
+import { planTransform } from "./previewTransforms";
 
 afterEach(cleanup);
 

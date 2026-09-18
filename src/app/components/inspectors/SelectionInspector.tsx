@@ -7,7 +7,7 @@ import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { FlipHorizontalIcon } from "@phosphor-icons/react/dist/csr/FlipHorizontal";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
-import type { ArtworkFrame, DisplayUnit, WallObject } from "../../../domain/project";
+import type { ArtworkFrame, DisplayUnit } from "../../../domain/project";
 import { FRAME_FINISHES } from "../../../domain/framing";
 import { formatLength } from "../../../domain/units/length";
 import type { ArrangeBoundary, ArrangeBoundaryKind } from "../../hooks/arrangeReadout";

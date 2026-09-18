@@ -1,4 +1,3 @@
-import { evaluateOpeningPair } from "../../domain/geometry/openingConnections";
 import { signedAreaMm2 } from "../../domain/geometry/polygon";
 import {
   areSharedBoundaryWalls,

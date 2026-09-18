@@ -1,4 +1,3 @@
-import { MathUtils } from "three";
 import type { Texture } from "three";
 import type { FloorObject3d } from "../../../domain/geometry/scene3d";
 import {
@@ -8,6 +7,7 @@ import {
 import { textureNativeAspect } from "./artworkFit";
 import { mmToWorld } from "./coordinates";
 import { floorSupportLayoutMm } from "./FloorObjectBox";
+import { planRotationToYaw } from "./planRotation";
 import { SelectionBoxOutline } from "./UncertaintyOutline";
 import { useSelectableFloorObject } from "./useSelectableFloorObject";
 import {
@@ -17,14 +17,6 @@ import {
   MONITOR_BODY_COLOR,
   MONITOR_SCREEN_COLOR
 } from "./tokens";
-
-// Plan-space rotation (CCW in plan x/y) to a three.js yaw about +y — the same
-// single sign flip FloorObjectBox owns, restated rather than imported because
-// both are two lines and a shared import would make one component's render
-// depend on the other's file.
-function planRotationToYaw(rotationDeg: number): number {
-  return -MathUtils.degToRad(rotationDeg);
-}
 
 // How far the screen (and, ahead of it, the image) floats off the cabinet's
 // front face so the coplanar surfaces can't z-fight. Same 1mm step and same

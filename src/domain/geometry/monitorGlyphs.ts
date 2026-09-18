@@ -17,6 +17,7 @@
 //   is the object's FRONT (see PlanObject.tsx's FRONT-FACE CONVENTION), which
 //   is the face the screen is on.
 
+import { isPositive } from "./isPositive";
 import type { Dimensions, MonitorSupport } from "../project";
 import {
   effectiveDisplayAs,
@@ -77,10 +78,6 @@ export type MonitorBoxSizeMm = {
   heightMm: number;
   depthMm: number;
 };
-
-function isPositive(value: number | undefined): value is number {
-  return value !== undefined && Number.isFinite(value) && value > 0;
-}
 
 // The monitor BOX's own size, from whatever the work records.
 //
