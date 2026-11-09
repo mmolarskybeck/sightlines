@@ -170,7 +170,7 @@ type Artwork = {
 }
 ```
 
-**Display type is derived unless stated (shipped 2026-08-28 → 31).** `effectiveDisplayAs` resolves explicit `displayAs` > any mat/frame set ⇒ `"framed"` (an existing framed work never loses its frame because its medium string happens to match a category) > a category derived from an exact-match Medium (`domain/placement/mediumCategory.ts`: photograph/painting/drawing-print → wall work, film/video → projection, sculpture/installation → sculpture; no substring matching) > `"framed"`. `effectivePlacementForm` then resolves explicit `placementForm` > monitor/sculpture → floor, projection → wall > an *explicit* `"framed"` → wall > the depth heuristic; a merely derived `"framed"` falls through, which is what keeps every project written before display types existed behaving identically. Projection and sculpture render frameless through `effectiveFraming` in `domain/framing.ts`, the single derivation point for 3D, elevation, PDF, tooltips and footprints. A box monitor is a black 4:3 cabinet whose placement `heightMm` is the cabinet only — the pedestal is added by renderers from the placement's resolved support (`resolveFloorSupport`: an explicit `support` wins, else a monitor with no explicit choice still resolves to its 800 mm cabinet-width pedestal). Any floor-placed work can stand on a **pedestal or plinth**, optionally under a **plexi bonnet**, through the inspector's "Stands on" select (Floor / Pedestal / Plinth / Suspended, the four mutually exclusive states; monitors never get Suspended); the support is an attached block on the placement, not a floor object of its own. Floor placements re-seed from record-dimension edits only while undiverged (±0.5 mm) from their seeded size, composed with the wall rebake into one undo entry.
+**Display type is derived unless stated (shipped 2026-08-28 → 31).** `effectiveDisplayAs` resolves explicit `displayAs` > any mat/frame set ⇒ `"framed"` (an existing framed work never loses its frame because its medium string happens to match a category) > a category derived from an exact-match Medium (`domain/placement/mediumCategory.ts`: photograph/painting/drawing-print → wall work, film/video → projection, sculpture/installation → sculpture; no substring matching) > `"framed"`. `effectivePlacementForm` then resolves explicit `placementForm` > monitor/sculpture → floor, projection → wall > an *explicit* `"framed"` → wall > the depth heuristic; a merely derived `"framed"` falls through, which is what keeps every project written before display types existed behaving identically. Projection and sculpture render frameless through `effectiveFraming` in `domain/framing.ts`, the single derivation point for 3D, elevation, PDF, tooltips and footprints. A box monitor is a black 4:3 cabinet whose placement `heightMm` is the cabinet only — placing one on the floor **materialises** a pedestal `SupportFloorObject` under it (footprint = cabinet, height 800 mm) rather than resolving one implicitly at render time; "absent choice means pedestal" survives as behavior with the mechanism now an object, not a flag. Any floor-placed work can stand on a **pedestal or plinth**, optionally under a **plexi bonnet** — its own `SupportFloorObject` (schema v8, 2026-09-18), the same kind of thing a wall shelf already is, so one pedestal can carry several works. Nothing on the work says what it stands on: a work is a *rider* when its footprint overlaps a support's top face and its `baseHeightMm` matches that support's `heightMm`, derived at every read (`placement/floorRiders.ts`) and never stored. The inspector reads this as a derived Support summary row with action chips (Put on pedestal/plinth, Select/Center support/Set on floor, Suspend) — never a select, because there is no field for a select to bind to. Floor placements re-seed from record-dimension edits only while undiverged (±0.5 mm) from their seeded size, composed with the wall rebake into one undo entry.
 
 Naming the mm fields explicitly (`widthMm`, not `width` + a separate `unit`) closes off the exact ambiguity the canonical-storage rule in §2 is meant to prevent — a bare `width: 20` field invites the question "20 what?" months later; `widthMm` doesn't. `unit` becomes purely a display/entry preference, never part of the measurement truth. Kept as one status for the whole `Dimensions` object in v1 rather than per-field (height known, depth unknown, etc.) — real museum data sometimes wants that granularity, but the structure doesn't block adding it later; it just isn't solved now.
 
@@ -246,30 +246,36 @@ type ArtworkFloorObject = FloorObjectBase & {
   kind: "artwork"
   artworkId: string
   imageFaces?: Face[]                 // absent = front + back; [] = every face deliberately off
-  monitorSupport?: "pedestal" | "floor"   // box monitors only; absent = pedestal
-  support?: FloorSupport              // the block the work stands on; absent = bare floor
+  // NOTHING here says what this work stands on: a work is a rider of a support
+  // when its footprint overlaps the support's and its baseHeightMm matches the
+  // support's heightMm within SUPPORT_SEAT_TOLERANCE_MM — derived at every read
+  // (placement/floorRiders.ts), never stored on either side.
   displayDimensionsOverride?: Dimensions
 }
 
-// The attached pedestal / plinth (+ optional plexi bonnet). NOT a standalone
-// floor object: one placement carries both boxes, so a plan drag moves the
-// assembly for free and the pair can never drift apart. `support` supersedes
-// `monitorSupport`, and `baseHeightMm` is ignored while one is present — the
-// work's bottom edge IS the support top. Relational invariants (the support
-// contains the work unless overhang is allowed, the footprints always overlap,
-// the work fits inside the glass) live in `normalizeFloorSupport`, not in zod;
-// schema v6 exists only so a v5 build refuses the file instead of stripping the
-// support and re-saving the loss.
-type FloorSupport = {
-  kind: "pedestal" | "plinth"
-  widthMm: number; depthMm: number; heightMm: number   // the SUPPORT box; the placement's W/D/H still size the work
-  offsetXMm?: number; offsetYMm?: number   // support centre relative to the WORK centre, in the placement's rotated local frame; absent = 0
-  overhangAllowed?: boolean    // absent/false = the work footprint stays inside the support top
-  bonnetHeightMm?: number      // plexi bonnet at the support's footprint, rising from its top; absent = none
-  bonnetHeightLocked?: boolean // absent/false = height tracks the work; true = the curator's number, warned about rather than grown
+// A pedestal or plinth standing on the floor, modelled on the wall shelf: its
+// OWN floor object (schema v8, floor-supports spec §2 — USER DECISION
+// 2026-09-18, superseding the 2026-09-17 attached-support model), not a block
+// on one artwork's placement. One pedestal can therefore carry several works.
+// `heightMm` is the TOP FACE height above the floor — the number a rider's
+// baseHeightMm matches. `baseHeightMm` is ignored on a support (it never
+// hangs) and `wallYMm` is written as 0 — there is no support↔wall conversion,
+// exactly as there is none for a case. Relational invariants (a rider's
+// footprint stays inside the top face unless overhang is allowed, the bonnet's
+// footprint is the support's, the drag clamp) are enforced live at the
+// interaction layer, not by a normalizer run at every write.
+type SupportFloorObject = FloorObjectBase & {
+  kind: "support"
+  supportKind: "pedestal" | "plinth"
+  bonnetHeightMm?: number      // plexi bonnet rising from the support's top face; absent = none
+  bonnetHeightLocked?: boolean // absent/false = height tracks the tallest rider; true = the curator's number
+  overhangAllowed?: boolean    // absent/false = a rider's footprint stays inside the top face
 }
 
-type FloorObject = ArtworkFloorObject | (FloorObjectBase & { kind: "blocked-zone" | "case" })
+type FloorObject =
+  | ArtworkFloorObject
+  | SupportFloorObject
+  | (FloorObjectBase & { kind: "blocked-zone" | "case" })
 ```
 
 (Field names carry their unit — `offsetXMm`, `rotationDeg` — per the same rule as `widthMm` in §4.1: a bare `offsetX: 240` invites "240 what?"; the suffix doesn't.)

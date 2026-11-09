@@ -349,14 +349,12 @@ describe("clampFitExtent", () => {
   });
 });
 
-// rotateHandleRectAt is what the rotate handle hangs off. The bug it exists to
-// prevent: a sculpture on a pedestal keeps the handle anchored to the WORK's
-// rect, so the stem and chip are drawn inside the pedestal painted around it.
+// rotateHandleRectAt is what the rotate handle hangs off. With supports modelled
+// as their own floor objects (schema v8) there is no assembly union to take: the
+// handle on a work is the work's rect, the handle on a pedestal is the
+// pedestal's.
 describe("rotateHandleRectAt", () => {
-  function floorArtwork(
-    support?: ArtworkFloorObject["support"],
-    rotationDeg = 0
-  ): ArtworkFloorObject {
+  function floorArtwork(rotationDeg = 0): ArtworkFloorObject {
     return {
       id: "fo-1",
       kind: "artwork",
@@ -367,8 +365,7 @@ describe("rotateHandleRectAt", () => {
       depthMm: 300,
       heightMm: 900,
       rotationDeg,
-      wallYMm: 1450,
-      ...(support ? { support } : {})
+      wallYMm: 1450
     };
   }
 
@@ -376,10 +373,8 @@ describe("rotateHandleRectAt", () => {
     return { object, rect: getFloorObjectPlanRect(object) };
   }
 
-  it("is the work's own rect at the given angle when nothing is under the work", () => {
-    const object = floorArtwork();
-
-    const rect = rotateHandleRectAt(entry(object), 45);
+  it("is the object's own rect at the given angle", () => {
+    const rect = rotateHandleRectAt(entry(floorArtwork()), 45);
 
     expect(rect.centerXMm).toBeCloseTo(1000, 6);
     expect(rect.centerYMm).toBeCloseTo(2000, 6);
@@ -388,52 +383,9 @@ describe("rotateHandleRectAt", () => {
     expect(rect.angleDeg).toBe(45);
   });
 
-  it("grows to the whole assembly's footprint for a work on a pedestal", () => {
-    const object = floorArtwork({
-      kind: "pedestal",
-      widthMm: 600,
-      depthMm: 500,
-      heightMm: 1100
-    });
-
-    const rect = rotateHandleRectAt(entry(object), 0);
-
-    // The pedestal contains the work (overhang off), so the union IS the
-    // pedestal — wide enough that the handle clears it.
-    expect(rect.widthMm).toBeCloseTo(600, 6);
-    expect(rect.depthMm).toBeCloseTo(500, 6);
-    expect(rect.centerXMm).toBeCloseTo(1000, 6);
-    expect(rect.centerYMm).toBeCloseTo(2000, 6);
-  });
-
-  it("re-evaluates an offset support's union at the rotation it is asked for", () => {
-    const object = floorArtwork({
-      kind: "plinth",
-      widthMm: 1200,
-      depthMm: 400,
-      heightMm: 150,
-      offsetXMm: 300,
-      overhangAllowed: true
-    });
-
-    const atZero = rotateHandleRectAt(entry(object), 0);
-    const atNinety = rotateHandleRectAt(entry(object), 90);
-
-    // Union at 0°: local x from -300 (plinth left edge) to 900 (plinth right
-    // edge), i.e. the plinth alone — it overhangs the work on one side only.
-    expect(atZero.widthMm).toBeCloseTo(1200, 6);
-    expect(atZero.centerXMm).toBeCloseTo(1000 + 300, 6);
-    expect(atZero.centerYMm).toBeCloseTo(2000, 6);
-    // The offset lives in the placement's rotated local frame, so a preview
-    // rotation moves the union's center — the same box, turned.
-    expect(atNinety.widthMm).toBeCloseTo(1200, 6);
-    expect(atNinety.angleDeg).toBe(90);
-    expect(atNinety.centerXMm).toBeCloseTo(1000, 6);
-    expect(atNinety.centerYMm).toBeCloseTo(2000 + 300, 6);
-  });
-
-  it("anchors to a box monitor's resolved default pedestal, whose footprint is the cabinet", () => {
-    const object = floorArtwork();
+  it("is unaffected by the joined artwork record", () => {
+    // A box monitor's cabinet is the rect it always was: whatever it stands on
+    // is a separate object with its own handle.
     const artwork: Artwork = {
       id: "art-1",
       schemaVersion: CURRENT_ARTWORK_SCHEMA_VERSION,
@@ -442,7 +394,7 @@ describe("rotateHandleRectAt", () => {
       metadata: {}
     };
 
-    const rect = rotateHandleRectAt({ ...entry(object), artwork }, 0);
+    const rect = rotateHandleRectAt({ ...entry(floorArtwork()), artwork }, 0);
 
     expect(rect.widthMm).toBeCloseTo(400, 6);
     expect(rect.depthMm).toBeCloseTo(300, 6);

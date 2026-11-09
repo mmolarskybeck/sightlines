@@ -1,73 +1,59 @@
+import { isMonitorArtwork } from "../../domain/geometry/monitorGlyphs";
 import {
-  isMonitorArtwork,
-  resolveMonitorSupport
-} from "../../domain/geometry/monitorGlyphs";
-import {
-  defaultFloorSupport,
-  normalizeFloorSupport,
-  resolveFloorSupport,
-  resolveStandsOn
+  BONNET_CLEARANCE_MM,
+  BONNET_HEADROOM_MM,
+  BONNET_MIN_HEIGHT_MM,
+  PEDESTAL_MAX_HEIGHT_MM,
+  PEDESTAL_MIN_HEIGHT_MM
 } from "../../domain/geometry/supportGlyphs";
+import { CASE_GLASS_THICKNESS_MM } from "../../domain/geometry/caseGlyphs";
+import {
+  createSupport,
+  defaultSupportForWork,
+  defaultSupportHeightMm,
+  monitorPedestalForPlacement,
+  supportFootprintCoveringMm,
+  supportMarginMm
+} from "../../domain/placement/createSupport";
+import {
+  getSupportRiders,
+  resolveFloorStandsOn
+} from "../../domain/placement/floorRiders";
 import {
   DEFAULT_FLOOR_OBJECT_IMAGE_FACES,
+  type Artwork,
   type ArtworkFloorObject,
   type FloorObject,
   type FloorObjectBase,
   type FloorObjectFace,
-  type FloorSupport,
-  type MonitorSupport,
-  type Project
+  type FloorSupportKind,
+  type Project,
+  type SupportFloorObject
 } from "../../domain/project";
 import type { AppState, EditExtras } from "../store";
 import { moveObjectNoun } from "./openingEdits";
 
-// Where a work goes when the curator picks "Suspended" and there is no height
-// to go back to. The app has never had a suspension default — "Height off
-// floor" is a plain number field seeded from `baseHeightMm ?? 0` — so this is a
-// NEW number, chosen as a plausible hanging height for a work on wires rather
-// than derived from anything: a 0 would read as "nothing happened" and leave
-// resolveStandsOn still answering "floor". A stale positive baseHeightMm left
-// under a support wins over it, so switching support → suspended restores the
-// height the work hung at before the pedestal went in.
+// Where a work goes when the curator picks "Suspend" and there is no height to
+// go back to. The app has never had a suspension default — "Height off floor"
+// is a plain number field seeded from `baseHeightMm ?? 0` — so this is a chosen
+// number rather than a derived one: a plausible hanging height for a work on
+// wires. 0 would read as "nothing happened" and leave resolveFloorStandsOn
+// still answering "floor".
 export const DEFAULT_SUSPENSION_HEIGHT_MM = 1000;
 
-// What a floor-placed work stands on, as the inspector's one select reads and
-// writes it. Mirrors resolveStandsOn's return type — the read and the write
-// must name the same four states or the control can show one it cannot set.
-export type FloorArtworkStandsOn = "floor" | "pedestal" | "plinth" | "suspended";
-
-// Structural equality for a support box. Every field is a number, a string or a
-// boolean, so this is a complete comparison — used to drop no-op writes before
-// they reach applyEdit and pile up dead undo entries (the same duty
-// setFloorArtworkImageFaces' set comparison does for faces).
-function sameSupport(a: FloorSupport | undefined, b: FloorSupport | undefined): boolean {
-  if (a === undefined || b === undefined) return a === b;
-  return (
-    a.kind === b.kind &&
-    a.widthMm === b.widthMm &&
-    a.depthMm === b.depthMm &&
-    a.heightMm === b.heightMm &&
-    a.offsetXMm === b.offsetXMm &&
-    a.offsetYMm === b.offsetYMm &&
-    a.overhangAllowed === b.overhangAllowed &&
-    a.bonnetHeightMm === b.bonnetHeightMm &&
-    a.bonnetHeightLocked === b.bonnetHeightLocked
-  );
+// The per-side inset from a support's edge to the largest rider footprint a
+// bonnet can cover: the glass wall plus its clearance. Mirrors
+// supportGlyphs.bonnetInsetMm, kept local so this slice states the rule it
+// applies at the write boundary.
+function bonnetInsetMm(): number {
+  return CASE_GLASS_THICKNESS_MM + BONNET_CLEARANCE_MM;
 }
 
-// Re-runs THE support normaliser (geometry/supportGlyphs.ts) against a floor
-// object's CURRENT dimensions, returning the same object when nothing moved.
-//
-// Called from every path that resizes the work rather than the support — the
-// inspector's Width/Depth/Height fields here, and the artwork-dimension rebake
-// in store.ts — because the relational invariants are all stated in terms of
-// the work: a work that grows past its pedestal's top face must push the
-// pedestal out in the SAME undo entry, or an undo would take back only half of
-// it.
-export function withNormalizedSupport<T extends FloorObject>(object: T): T {
-  if (object.kind !== "artwork" || !object.support) return object;
-  const { support, changed } = normalizeFloorSupport(object, object.support);
-  return changed ? { ...object, support } : object;
+// UI noun for a support kind. The inspector labels and the undo history both
+// say "pedestal"/"plinth"; "support" and "rider" are internal words that never
+// reach a curator (floor-supports spec §7).
+function supportNoun(kind: FloorSupportKind): string {
+  return kind === "plinth" ? "plinth" : "pedestal";
 }
 
 export type FloorObjectSliceActions = {
@@ -87,53 +73,62 @@ export type FloorObjectSliceActions = {
   // mis-handle — two equal face sets are never reference-equal, so every
   // commit would look like a change and pile up undo entries.
   setFloorArtworkImageFaces: (objectId: string, faces: FloorObjectFace[]) => Promise<void>;
-  // What a box-monitor placement stands on (pedestal or bare floor). Its own
-  // action for the same reason as setFloorArtworkImageFaces: monitorSupport
-  // lives on ArtworkFloorObject, not FloorObjectBase, so updateFloorObject's
-  // FloorObjectBase-shaped change set cannot express it. Writes the literal
-  // value — "pedestal" from the control is a STATED choice, distinct from the
-  // absent "never chosen" that also resolves to pedestal.
-  setFloorArtworkMonitorSupport: (
-    objectId: string,
-    monitorSupport: MonitorSupport
-  ) => Promise<void>;
-  // What a floor-placed ARTWORK stands on, as one four-state choice: bare
-  // floor, a pedestal, a plinth, or wires. One action rather than a support
-  // writer plus a suspension writer because the four states are MUTUALLY
-  // EXCLUSIVE and each transition has to clear the losing state's keys in the
-  // same entry — a pedestal left beside a stale baseHeightMm renders as a
-  // pedestal (the support wins) and then springs back into the air the moment
-  // the pedestal is removed. One undo entry, "Change support".
+  // ─── Stands-on actions (floor-supports spec §7) ─────────────────────────
   //
-  // A monitor never gets "suspended" (the elevation ghost, CrtMonitorMesh and
-  // resolveStandsOn all refuse to float a cabinet), so that combination is a
-  // no-op rather than a state the UI has to remember not to offer.
-  setFloorArtworkStandsOn: (
-    objectId: string,
-    standsOn: FloorArtworkStandsOn
-  ) => Promise<void>;
-  // Edits the support BOX itself (size, the work's offset on it, overhang, the
-  // plexi bonnet). Every write runs normalizeFloorSupport, so the relational
-  // invariants hold after an inspector commit exactly as they do after a load:
-  // a width typed smaller than the work clamps back up, an offset that would
-  // detach the pedestal clamps in, an unlocked bonnet re-derives its height.
+  // The old stands-on WRITERS (setFloorArtworkStandsOn /
+  // setFloorArtworkMonitorSupport / updateFloorArtworkSupport) are gone with
+  // the attached-support model. What a work stands on is derived from geometry
+  // (floorRiders.resolveFloorStandsOn); these actions do not write that
+  // relationship, they MOVE THE GEOMETRY that produces it — which is why each
+  // one is a single applyEdit rather than a field assignment.
+
+  // Creates a pedestal/plinth under a floor-placed work and stands the work on
+  // it: sized from the work by defaultSupportForWork, centred on it, at the
+  // work's own angle, inserted into the floor list IMMEDIATELY BEFORE the work
+  // so it draws beneath it. One undo entry; the selection stays on the work.
   //
-  // `changes` follows the store's usual absent-vs-present discipline with ONE
-  // documented addition: an EXPLICIT `undefined` for an optional key deletes
-  // it. That is the only way to express "turn the bonnet off"
-  // (`{ bonnetHeightMm: undefined }`), which must delete the height AND its
-  // lock rather than write a 0 the schema would reject.
-  //
-  // Typing a number into the bonnet height LOCKS it (bonnetHeightLocked: true)
-  // — a number the curator typed is a number they meant, and an unlocked
-  // bonnet would re-derive it away on the very next normalise. Enabling the
-  // bonnet does not lock: that write sets the height from absent, and the
-  // derived-tracking reading is the right default. "Fit to work" is
-  // `{ bonnetHeightLocked: false }`, which hands the height back to the work.
-  updateFloorArtworkSupport: (
-    objectId: string,
-    changes: Partial<FloorSupport>
+  // An already-SUSPENDED work keeps its height: the new pedestal is built to
+  // reach the work rather than dropping it to a default, clamped to what a
+  // pedestal can physically be. A plinth keeps the plinth default — a
+  // 1400mm-tall plinth is not a plinth.
+  putFloorArtworkOnSupport: (objectId: string, kind: FloorSupportKind) => Promise<void>;
+  // "Set on floor": DELETES baseHeightMm rather than writing 0. Absence is how
+  // this codebase records "resting on the floor" (FloorObjectBase), and a
+  // spurious 0 key makes a clean project hash dirty for the cloud backup check.
+  // The support stays exactly where it is.
+  setFloorArtworkOnFloor: (objectId: string) => Promise<void>;
+  // "Suspend": hangs the work at DEFAULT_SUSPENSION_HEIGHT_MM. Refused (a
+  // no-op) for a box monitor — a monitor is never suspended, an existing rule
+  // the elevation ghost, the 3D mesh and resolveFloorStandsOn all already apply.
+  suspendFloorArtwork: (objectId: string) => Promise<void>;
+  // "Center on pedestal": moves the work to its support's centre in plan.
+  centerFloorArtworkOnSupport: (objectId: string) => Promise<void>;
+
+  // ─── Support inspector actions ──────────────────────────────────────────
+
+  // Pedestal ⇄ plinth. A RELABEL: the height is re-defaulted only when the
+  // current one is still the other kind's default, so a curator's typed height
+  // survives the switch. When the height does change, the riders' baseHeightMm
+  // follows in the same edit.
+  setSupportKind: (supportId: string, kind: FloorSupportKind) => Promise<void>;
+  // The plexi bonnet. `enabled` switches it on/off, `heightMm` types a height
+  // (which LOCKS it only when a bonnet already exists — the enable write also
+  // carries a height, and locking there would freeze a number nobody chose),
+  // `locked` sets the lock explicitly (unlocking re-derives from the riders).
+  // Enabling grows the footprint so the riders fit inside the glass and clears
+  // overhangAllowed: you cannot hang a work over the edge of a box you have
+  // also put glass around.
+  setSupportBonnet: (
+    supportId: string,
+    changes: { enabled?: boolean; heightMm?: number; locked?: boolean }
   ) => Promise<void>;
+  // "Allow overhang". Turning it OFF grows the footprint until the riders are
+  // contained (no margin — they must simply be ON the top face).
+  setSupportOverhangAllowed: (supportId: string, allowed: boolean) => Promise<void>;
+  // "Fit to works": grows the footprint to the riders' union plus the kind's
+  // curatorial reveal. NEVER shrinks (a curator who sized a big plinth by hand
+  // did not ask for it back) and a no-op with no riders.
+  fitSupportToWorks: (supportId: string) => Promise<void>;
   // Snaps two floor-placed artworks together as one two-sided panel: the
   // moving board lands flat against the ANCHOR board's back face, rotated
   // 180°, so each work shows on an opposite side of the combined panel (the
@@ -162,6 +157,85 @@ export function createFloorObjectSlice(
   internals: FloorObjectSliceInternals
 ): { actions: FloorObjectSliceActions } {
   const { applyEdit } = internals;
+
+  // id→Artwork for the joins the support rules need: "is this cabinet a box
+  // monitor" (which decides the pedestal it gets and whether it may be
+  // suspended at all) and resolveFloorStandsOn's monitor-is-never-suspended
+  // reading. Rebuilt per call, exactly as placementSlice does it.
+  function artworksById(): ReadonlyMap<string, Artwork> {
+    return new Map(get().libraryArtworks.map((artwork) => [artwork.id, artwork]));
+  }
+
+  function artworkFor(object: ArtworkFloorObject): Artwork | undefined {
+    return get().libraryArtworks.find((candidate) => candidate.id === object.artworkId);
+  }
+
+  function findSupport(project: Project, supportId: string): SupportFloorObject | undefined {
+    return project.floorObjects.find(
+      (object): object is SupportFloorObject =>
+        object.kind === "support" && object.id === supportId
+    );
+  }
+
+  // The box a fresh support gets for one work. A BOX MONITOR's pedestal is not
+  // a curatorial choice with margins — it is the cabinet's own footprint at
+  // MONITOR_PEDESTAL_HEIGHT_MM, the 2026-08-28 USER DECISION's default stand,
+  // now expressed as an object instead of an absent field. A plinth under a
+  // monitor is a deliberate different request and takes the ordinary rules.
+  function supportBoxForWork(
+    target: ArtworkFloorObject,
+    artwork: Artwork | undefined,
+    kind: FloorSupportKind,
+    project: Project
+  ): { widthMm: number; depthMm: number; heightMm: number } {
+    if (kind === "pedestal" && isMonitorArtwork(artwork)) {
+      const pedestal = monitorPedestalForPlacement({
+        xMm: target.xMm,
+        yMm: target.yMm,
+        widthMm: target.widthMm,
+        depthMm: target.depthMm,
+        rotationDeg: target.rotationDeg
+      });
+      return {
+        widthMm: pedestal.widthMm,
+        depthMm: pedestal.depthMm,
+        heightMm: pedestal.heightMm
+      };
+    }
+    // The FLOOR OBJECT's own box, not the library record's dimensions: it is
+    // what is actually standing on the floor (a resized placement, a monitor's
+    // cabinet), and it is the box the containment rules then measure.
+    return defaultSupportForWork({
+      kind,
+      work: { widthMm: target.widthMm, depthMm: target.depthMm, heightMm: target.heightMm },
+      project
+    });
+  }
+
+  // One commit path for every support-inspector edit: drop the no-op, carry the
+  // riders through the same supportRiderEdits the numeric fields use (a height
+  // change re-seats them), and push exactly one undo entry.
+  async function commitSupport(
+    target: SupportFloorObject,
+    next: SupportFloorObject,
+    label: string
+  ): Promise<void> {
+    const project = get().project;
+    if (!project) return;
+    if (sameSupport(target, next)) return;
+
+    const riderEdits = supportRiderEdits(target, next, project.floorObjects);
+    const nextFloorObjects = project.floorObjects.map((object) => {
+      if (object.id === target.id) return next;
+      const riderEdit = riderEdits.get(object.id);
+      return riderEdit ? riderEdit(object) : object;
+    });
+
+    await applyEdit(label, (current) => ({
+      ...current,
+      floorObjects: nextFloorObjects
+    }));
+  }
 
   const actions: FloorObjectSliceActions = {
     async updateFloorObject(objectId, changes) {
@@ -214,17 +288,33 @@ export function createFloorObjectSlice(
       );
       if (!hasChange) return;
 
-      // withNormalizedSupport rides the SAME entry: Width/Depth/Height here
-      // size the WORK, and the support's invariants are all stated against the
-      // work's footprint, so a work typed wider than its pedestal grows the
-      // pedestal (and re-derives an unlocked bonnet) as part of this one edit.
-      // Splitting it into a second applyEdit would make one undo restore a work
-      // that no longer fits the box it is standing on.
-      const nextFloorObjects = project.floorObjects.map((object) =>
-        object.id === objectId
-          ? withNormalizedSupport({ ...object, ...safeChanges })
-          : object
-      );
+      const moved = { ...target, ...safeChanges } as FloorObject;
+
+      // A SUPPORT carries its riders (floor-supports spec §4), in this same
+      // edit, so one undo puts the whole assembly back. This is the numeric
+      // twin of the plan drag's rigid group: the inspector's X/Y and Angle
+      // fields, the plan rotate handle and a 3D drag all commit through here,
+      // so putting the rule at the write boundary is what makes every one of
+      // them behave the same without four copies of the arithmetic.
+      //
+      //  - xMm/yMm   translate the riders by the same delta.
+      //  - rotationDeg rotates each rider's CENTRE about the support's centre
+      //    by the delta, and adds the delta to the rider's own rotationDeg —
+      //    the assembly turns as one body, not as a box with loose objects on
+      //    it.
+      //  - heightMm  re-seats the riders: their baseHeightMm IS the top face.
+      //  - widthMm/depthMm move nothing. Resizing the box under a work does
+      //    not slide the work.
+      const riderEdits =
+        target.kind === "support"
+          ? supportRiderEdits(target, moved as SupportFloorObject, project.floorObjects)
+          : null;
+
+      const nextFloorObjects = project.floorObjects.map((object) => {
+        if (object.id === objectId) return moved;
+        const riderEdit = riderEdits?.get(object.id);
+        return riderEdit ? riderEdit(object) : object;
+      });
 
       // Floor objects carry no wall bounds, so there's nothing to validate
       // here in v1 (see placeArtworkOnFloor).
@@ -232,6 +322,246 @@ export function createFloorObjectSlice(
         ...current,
         floorObjects: nextFloorObjects
       }));
+    },
+
+    async putFloorArtworkOnSupport(objectId, kind) {
+      const project = get().project;
+      if (!project) return;
+
+      const index = project.floorObjects.findIndex((object) => object.id === objectId);
+      if (index < 0) return;
+      const target = project.floorObjects[index];
+      if (target.kind !== "artwork") return;
+
+      const artwork = artworkFor(target);
+      const box = supportBoxForWork(target, artwork, kind, project);
+
+      // Already suspended? The pedestal is built UP TO the work rather than
+      // dropping it: the height the curator chose is the statement, and a
+      // support that appeared under it at a stock height would move the work.
+      // Clamped to what a pedestal can be; a plinth keeps its own default,
+      // because a plinth is defined by being low.
+      const standsOn = resolveFloorStandsOn(target, project.floorObjects, artworksById());
+      const heightMm =
+        standsOn.kind === "suspended" && kind === "pedestal"
+          ? Math.min(
+              Math.max(standsOn.heightMm, PEDESTAL_MIN_HEIGHT_MM),
+              PEDESTAL_MAX_HEIGHT_MM
+            )
+          : box.heightMm;
+
+      const support = createSupport({
+        kind,
+        xMm: target.xMm,
+        yMm: target.yMm,
+        rotationDeg: target.rotationDeg,
+        widthMm: box.widthMm,
+        depthMm: box.depthMm,
+        heightMm
+      });
+
+      // BEFORE the work in the list: plan and 3D both draw floor objects in
+      // stored order, so the box has to precede the thing standing on it or the
+      // work is painted under its own pedestal.
+      const nextFloorObjects = [
+        ...project.floorObjects.slice(0, index),
+        support,
+        { ...target, baseHeightMm: support.heightMm },
+        ...project.floorObjects.slice(index + 1)
+      ];
+
+      // No selection write: the curator is looking at the WORK's inspector and
+      // pressed a button in it. Stealing the selection would swap the pane out
+      // from under them.
+      await applyEdit(`Put on ${supportNoun(kind)}`, (current) => ({
+        ...current,
+        floorObjects: nextFloorObjects
+      }));
+    },
+
+    async setFloorArtworkOnFloor(objectId) {
+      const project = get().project;
+      if (!project) return;
+
+      const target = project.floorObjects.find((object) => object.id === objectId);
+      if (!target || target.baseHeightMm === undefined) return;
+
+      const nextFloorObjects = project.floorObjects.map((object) =>
+        object.id === objectId ? withoutBaseHeight(object) : object
+      );
+
+      await applyEdit("Set on floor", (current) => ({
+        ...current,
+        floorObjects: nextFloorObjects
+      }));
+    },
+
+    async suspendFloorArtwork(objectId) {
+      const project = get().project;
+      if (!project) return;
+
+      const target = project.floorObjects.find((object) => object.id === objectId);
+      if (!target || target.kind !== "artwork") return;
+      // A monitor is never suspended: a CRT on wires is not a thing, and every
+      // renderer already treats a cabinet's baseHeightMm as 0 when nothing is
+      // under it. Refusing here keeps the document from carrying a height no
+      // view will draw.
+      if (isMonitorArtwork(artworkFor(target))) return;
+      if (target.baseHeightMm === DEFAULT_SUSPENSION_HEIGHT_MM) return;
+
+      const nextFloorObjects = project.floorObjects.map((object) =>
+        object.id === objectId
+          ? { ...object, baseHeightMm: DEFAULT_SUSPENSION_HEIGHT_MM }
+          : object
+      );
+
+      await applyEdit("Suspend artwork", (current) => ({
+        ...current,
+        floorObjects: nextFloorObjects
+      }));
+    },
+
+    async centerFloorArtworkOnSupport(objectId) {
+      const project = get().project;
+      if (!project) return;
+
+      const target = project.floorObjects.find((object) => object.id === objectId);
+      if (!target) return;
+
+      const standsOn = resolveFloorStandsOn(target, project.floorObjects, artworksById());
+      if (standsOn.kind !== "support") return;
+      const { support } = standsOn;
+      if (target.xMm === support.xMm && target.yMm === support.yMm) return;
+
+      const nextFloorObjects = project.floorObjects.map((object) =>
+        object.id === objectId ? { ...object, xMm: support.xMm, yMm: support.yMm } : object
+      );
+
+      await applyEdit(`Center on ${supportNoun(support.supportKind)}`, (current) => ({
+        ...current,
+        floorObjects: nextFloorObjects
+      }));
+    },
+
+    async setSupportKind(supportId, kind) {
+      const project = get().project;
+      if (!project) return;
+
+      const target = findSupport(project, supportId);
+      if (!target || target.supportKind === kind) return;
+
+      // Re-default the height only while it is STILL the other kind's default.
+      // A typed height is a curatorial number and survives a relabel; an
+      // untouched one is just the previous kind's opinion and should become
+      // this kind's.
+      const heightMm =
+        target.heightMm === defaultSupportHeightMm(target.supportKind)
+          ? defaultSupportHeightMm(kind)
+          : target.heightMm;
+
+      const next: SupportFloorObject = { ...target, supportKind: kind, heightMm };
+      await commitSupport(target, next, `Change to ${supportNoun(kind)}`);
+    },
+
+    async setSupportBonnet(supportId, changes) {
+      const project = get().project;
+      if (!project) return;
+
+      const target = findSupport(project, supportId);
+      if (!target) return;
+
+      const riders = getSupportRiders(target, project.floorObjects, artworksById());
+      const hadBonnet = target.bonnetHeightMm !== undefined;
+
+      // Off: delete BOTH keys. Leaving bonnetHeightLocked behind would be a
+      // lock on a bonnet that does not exist, and turning the bonnet back on
+      // would silently inherit it.
+      if (changes.enabled === false) {
+        if (!hadBonnet) return;
+        const next = { ...target } as SupportFloorObject;
+        delete next.bonnetHeightMm;
+        delete next.bonnetHeightLocked;
+        await commitSupport(target, next, "Remove bonnet");
+        return;
+      }
+
+      const wantsBonnet = hadBonnet || changes.enabled === true;
+      if (!wantsBonnet) return;
+
+      // Typing a height LOCKS it — but only when a bonnet is already on. The
+      // enable write also carries a height (the derived one), and locking there
+      // would freeze a number the curator never chose and stop it tracking the
+      // works.
+      const locked =
+        changes.locked ??
+        (hadBonnet && changes.heightMm !== undefined ? true : target.bonnetHeightLocked);
+
+      const derivedMm = Math.max(
+        BONNET_MIN_HEIGHT_MM,
+        riders.reduce((tallest, rider) => Math.max(tallest, rider.heightMm), 0) +
+          BONNET_HEADROOM_MM
+      );
+      const typedMm = changes.heightMm ?? target.bonnetHeightMm;
+      const bonnetHeightMm =
+        locked === true && typedMm !== undefined
+          ? Math.max(BONNET_MIN_HEIGHT_MM, typedMm)
+          : derivedMm;
+
+      // The glass has to CLEAR the works: grow the footprint until every rider
+      // fits inside it with the glass wall and its air. Never shrinks, and
+      // symmetric about the centre (supportFootprintCoveringMm).
+      const footprint = supportFootprintCoveringMm(target, riders, bonnetInsetMm());
+
+      const next: SupportFloorObject = {
+        ...target,
+        ...footprint,
+        bonnetHeightMm,
+        ...(locked !== undefined ? { bonnetHeightLocked: locked } : {})
+      };
+      if (locked === undefined) delete next.bonnetHeightLocked;
+      // A bonnet CLEARS overhang: the key is deleted, not set false, so
+      // removing the bonnet later restores "never chosen".
+      delete next.overhangAllowed;
+
+      await commitSupport(target, next, hadBonnet ? "Edit bonnet" : "Add bonnet");
+    },
+
+    async setSupportOverhangAllowed(supportId, allowed) {
+      const project = get().project;
+      if (!project) return;
+
+      const target = findSupport(project, supportId);
+      if (!target || (target.overhangAllowed ?? false) === allowed) return;
+
+      const riders = getSupportRiders(target, project.floorObjects, artworksById());
+      // Turning overhang OFF has to make the promise true: grow the box until
+      // the works it carries are actually on the top face. No margin — this is
+      // containment, not a reveal.
+      const footprint = allowed
+        ? { widthMm: target.widthMm, depthMm: target.depthMm }
+        : supportFootprintCoveringMm(target, riders, 0);
+
+      const next: SupportFloorObject = { ...target, ...footprint, overhangAllowed: allowed };
+      await commitSupport(target, next, allowed ? "Allow overhang" : "Disallow overhang");
+    },
+
+    async fitSupportToWorks(supportId) {
+      const project = get().project;
+      if (!project) return;
+
+      const target = findSupport(project, supportId);
+      if (!target) return;
+
+      const riders = getSupportRiders(target, project.floorObjects, artworksById());
+      if (riders.length === 0) return;
+
+      const footprint = supportFootprintCoveringMm(
+        target,
+        riders,
+        supportMarginMm(target.supportKind)
+      );
+      const next: SupportFloorObject = { ...target, ...footprint };
+      await commitSupport(target, next, `Fit ${supportNoun(target.supportKind)} to works`);
     },
 
     async setFloorArtworkImageFaces(objectId, faces) {
@@ -260,195 +590,6 @@ export function createFloorObjectSlice(
       );
 
       await applyEdit("Edit image faces", (current) => ({
-        ...current,
-        floorObjects: nextFloorObjects
-      }));
-    },
-
-    async setFloorArtworkMonitorSupport(objectId, monitorSupport) {
-      const project = get().project;
-      if (!project) return;
-
-      const target = project.floorObjects.find((object) => object.id === objectId);
-      // Kind-gated at the write, exactly like setFloorArtworkImageFaces:
-      // monitorSupport is only representable on ArtworkFloorObject, so a
-      // stray call for a case or a blocked zone is dropped rather than stored
-      // somewhere every reader would then have to remember to ignore.
-      if (!target || target.kind !== "artwork") return;
-
-      // Compare against the RESOLVED value, not the stored one: an untouched
-      // placement is already showing a pedestal, so re-choosing "pedestal"
-      // must not push a dead undo entry. It does still get WRITTEN the first
-      // time it differs from absent in nothing but explicitness — that is why
-      // this is a resolved-value comparison and not `target.monitorSupport
-      // === monitorSupport`. (Absent + "pedestal" therefore stays absent,
-      // which is the honest record: the curator never overrode the default.)
-      if (resolveMonitorSupport(target.monitorSupport) === monitorSupport) return;
-
-      const nextFloorObjects = project.floorObjects.map((object) =>
-        object.id === objectId ? { ...object, monitorSupport } : object
-      );
-
-      await applyEdit("Edit monitor support", (current) => ({
-        ...current,
-        floorObjects: nextFloorObjects
-      }));
-    },
-
-    async setFloorArtworkStandsOn(objectId, standsOn) {
-      const project = get().project;
-      if (!project) return;
-
-      const target = project.floorObjects.find((object) => object.id === objectId);
-      // Kind-gated at the write, like every other field that lives on
-      // ArtworkFloorObject rather than FloorObjectBase.
-      if (!target || target.kind !== "artwork") return;
-
-      const artwork = get().libraryArtworks.find(
-        (candidate) => candidate.id === target.artworkId
-      );
-      const isMonitor = isMonitorArtwork(artwork);
-
-      // A cabinet never hangs on wires. Refused here and not merely hidden in
-      // the UI: resolveStandsOn already declines to report a monitor as
-      // suspended, so writing the height would produce a document whose stored
-      // state no control can see or undo.
-      if (standsOn === "suspended" && isMonitor) return;
-
-      // Compare against the RESOLVED state, not the stored keys — an untouched
-      // monitor placement is already standing on its 800mm pedestal, so
-      // re-choosing "Pedestal" must not push a dead undo entry (the same
-      // resolved-value comparison setFloorArtworkMonitorSupport makes).
-      if (resolveStandsOn(target, artwork) === standsOn) return;
-
-      const next: ArtworkFloorObject = { ...target };
-
-      if (standsOn === "pedestal" || standsOn === "plinth") {
-        // defaultFloorSupport already sizes the box around the work, so the
-        // normaliser has nothing to fix here; it runs anyway because it is
-        // idempotent and because "every write goes through the normaliser" is
-        // the invariant that keeps the stored shape honest.
-        next.support = normalizeFloorSupport(
-          target,
-          defaultFloorSupport({
-            kind: standsOn,
-            objectWidthMm: target.widthMm,
-            objectDepthMm: target.depthMm,
-            objectHeightMm: target.heightMm,
-            isMonitor,
-            centerlineHeightMm: project.defaultCenterlineHeightMm
-          })
-        ).support;
-        // Both losing states are cleared, not left dormant: baseHeightMm under
-        // a support is ignored by every renderer, so leaving it would hide a
-        // suspension that reappears when the support comes off, and an explicit
-        // monitorSupport:"floor" would contradict the pedestal now under it.
-        delete next.baseHeightMm;
-        delete next.monitorSupport;
-      } else if (standsOn === "floor") {
-        delete next.support;
-        delete next.baseHeightMm;
-        // ABSENT WOULD RESOLVE BACK TO PEDESTAL for a monitor (see
-        // ArtworkFloorObject.monitorSupport), so bare floor has to be stated.
-        // Non-monitor works never read this field, so theirs is left alone
-        // rather than gaining a key no renderer consults.
-        if (isMonitor) next.monitorSupport = "floor";
-      } else {
-        delete next.support;
-        // A height the work already had wins over the default: taking a work
-        // off its pedestal and back onto wires should return it to where it
-        // hung, and a stale positive baseHeightMm parked under a support is
-        // exactly that memory.
-        next.baseHeightMm =
-          (target.baseHeightMm ?? 0) > 0
-            ? (target.baseHeightMm as number)
-            : DEFAULT_SUSPENSION_HEIGHT_MM;
-      }
-
-      const nextFloorObjects = project.floorObjects.map((object) =>
-        object.id === objectId ? next : object
-      );
-
-      await applyEdit("Change support", (current) => ({
-        ...current,
-        floorObjects: nextFloorObjects
-      }));
-    },
-
-    async updateFloorArtworkSupport(objectId, changes) {
-      const project = get().project;
-      if (!project) return;
-
-      const target = project.floorObjects.find((object) => object.id === objectId);
-      if (!target || target.kind !== "artwork") return;
-
-      const artwork = get().libraryArtworks.find(
-        (candidate) => candidate.id === target.artworkId
-      );
-      // Read through the resolver so a monitor's implicit 800mm pedestal can be
-      // edited at all: the first edit MATERIALISES it as an explicit support
-      // (source "monitor-default" has no stored object behind it), which is
-      // also the moment the curator stops being covered by the absent-means-
-      // pedestal default and starts owning the numbers.
-      const resolved = resolveFloorSupport(target, artwork);
-      if (!resolved) return;
-      const { source: _source, ...current } = resolved;
-
-      // Explicit `undefined` DELETES; a key not present in `changes` keeps the
-      // current value. `in` rather than a truthiness or `!== undefined` test is
-      // the whole mechanism — `{ bonnetHeightMm: undefined }` (turn the bonnet
-      // off) and `{}` (change nothing) are otherwise indistinguishable.
-      const pick = <K extends keyof FloorSupport>(
-        key: K
-      ): FloorSupport[K] | undefined => (key in changes ? changes[key] : current[key]);
-
-      const offsetXMm = pick("offsetXMm");
-      const offsetYMm = pick("offsetYMm");
-      const overhangAllowed = pick("overhangAllowed");
-      const bonnetHeightMm = pick("bonnetHeightMm");
-      let bonnetHeightLocked = pick("bonnetHeightLocked");
-
-      // Typing a number into the bonnet height locks it. Gated on the bonnet
-      // ALREADY being on, which is what separates "typed a height" from
-      // "switched the bonnet on" — the enable write also carries a height (the
-      // derived one), and locking there would freeze a number the curator never
-      // chose and stop it tracking the work.
-      if (
-        current.bonnetHeightMm !== undefined &&
-        typeof changes.bonnetHeightMm === "number" &&
-        changes.bonnetHeightLocked === undefined
-      ) {
-        bonnetHeightLocked = true;
-      }
-
-      const merged: FloorSupport = {
-        kind: pick("kind") ?? current.kind,
-        widthMm: pick("widthMm") ?? current.widthMm,
-        depthMm: pick("depthMm") ?? current.depthMm,
-        heightMm: pick("heightMm") ?? current.heightMm,
-        ...(offsetXMm !== undefined ? { offsetXMm } : {}),
-        ...(offsetYMm !== undefined ? { offsetYMm } : {}),
-        ...(overhangAllowed !== undefined ? { overhangAllowed } : {}),
-        ...(bonnetHeightMm !== undefined ? { bonnetHeightMm } : {}),
-        ...(bonnetHeightLocked !== undefined ? { bonnetHeightLocked } : {})
-      };
-
-      // THE normaliser, on every write (see updateFloorObject for the other
-      // half of the rule). A clamped write still commits the clamped value, so
-      // the inspector's fields — which read back from the store — show what was
-      // actually stored rather than what was typed.
-      const { support } = normalizeFloorSupport(target, merged);
-
-      // Compared against the RESOLVED support, so a monitor edit that clamps
-      // back to its own default does not materialise a support that changes
-      // nothing, and a re-commit of an unchanged field pushes no undo entry.
-      if (sameSupport(current, support)) return;
-
-      const nextFloorObjects = project.floorObjects.map((object) =>
-        object.id === objectId ? { ...object, support } : object
-      );
-
-      await applyEdit("Edit support", (current) => ({
         ...current,
         floorObjects: nextFloorObjects
       }));
@@ -524,4 +665,83 @@ export function createFloorObjectSlice(
   };
 
   return { actions };
+}
+
+// ─── Support helpers (pure) ────────────────────────────────────────────────
+
+// baseHeightMm DELETED, not zeroed. Absence is this codebase's "resting on the
+// floor" (FloorObjectBase's own note), and a spurious 0 key makes a clean
+// project hash dirty for the cloud backup's fingerprint check.
+function withoutBaseHeight<T extends FloorObject>(object: T): T {
+  const next = { ...object };
+  delete next.baseHeightMm;
+  return next;
+}
+
+// Structural equality for a support, so a re-commit of an unchanged field
+// pushes no dead undo entry. Every field is a number, a string or a boolean, so
+// this is a complete comparison.
+function sameSupport(a: SupportFloorObject, b: SupportFloorObject): boolean {
+  return (
+    a.supportKind === b.supportKind &&
+    a.xMm === b.xMm &&
+    a.yMm === b.yMm &&
+    a.widthMm === b.widthMm &&
+    a.depthMm === b.depthMm &&
+    a.heightMm === b.heightMm &&
+    a.rotationDeg === b.rotationDeg &&
+    a.bonnetHeightMm === b.bonnetHeightMm &&
+    a.bonnetHeightLocked === b.bonnetHeightLocked &&
+    a.overhangAllowed === b.overhangAllowed
+  );
+}
+
+// What each rider of `before` has to become when the support becomes `after` —
+// THE rider-carry rule (floor-supports spec §4), stated once so every write
+// path into a support (the inspector's numeric fields, the plan rotate handle,
+// a 3D drag, the support-inspector actions) moves the works the same way.
+//
+// Riders are derived from the BEFORE state, like everywhere else: the works
+// standing on the pedestal when the edit began are the ones it carries. A
+// work whose seat the edit happens to create is not retro-actively picked up.
+//
+// Returns id → transform so the caller can fold it into the one map that also
+// replaces the support, keeping the whole assembly in a single applyEdit.
+export function supportRiderEdits(
+  before: SupportFloorObject,
+  after: SupportFloorObject,
+  floorObjects: readonly FloorObject[],
+  artworksById?: ReadonlyMap<string, Artwork>
+): Map<string, (object: FloorObject) => FloorObject> {
+  const dxMm = after.xMm - before.xMm;
+  const dyMm = after.yMm - before.yMm;
+  const dRotDeg = after.rotationDeg - before.rotationDeg;
+  const heightChanged = after.heightMm !== before.heightMm;
+  const edits = new Map<string, (object: FloorObject) => FloorObject>();
+  if (dxMm === 0 && dyMm === 0 && dRotDeg === 0 && !heightChanged) return edits;
+
+  const rotRad = (dRotDeg * Math.PI) / 180;
+  const cos = Math.cos(rotRad);
+  const sin = Math.sin(rotRad);
+
+  for (const rider of getSupportRiders(before, floorObjects, artworksById)) {
+    edits.set(rider.id, (object) => {
+      // Rotate about the support's OLD centre first, then translate: the two
+      // compose to the same rigid motion the support itself underwent, and
+      // doing it in this order means a single edit that both turns and slides
+      // needs no intermediate frame.
+      const offsetXMm = object.xMm - before.xMm;
+      const offsetYMm = object.yMm - before.yMm;
+      return {
+        ...object,
+        xMm: before.xMm + offsetXMm * cos - offsetYMm * sin + dxMm,
+        yMm: before.yMm + offsetXMm * sin + offsetYMm * cos + dyMm,
+        rotationDeg: object.rotationDeg + dRotDeg,
+        // The top face IS the rider's bottom edge, so a height edit re-seats
+        // rather than leaving the works hanging at the old top.
+        ...(heightChanged ? { baseHeightMm: after.heightMm } : {})
+      };
+    });
+  }
+  return edits;
 }

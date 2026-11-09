@@ -3,8 +3,8 @@ import {
   CURRENT_SCHEMA_VERSION,
   type ArtworkFloorObject,
   type ArtworkWallObject,
-  type FloorSupport,
   type OpeningWallObject,
+  type SupportFloorObject,
   type ShelfWallObject
 } from "../project";
 import { createSampleProject } from "../sample/sampleProject";
@@ -33,9 +33,7 @@ function makeOpening(
   } as OpeningWallObject;
 }
 
-// A 400 x 300 x 900 sculpture standing on the floor, ready to be given a
-// support. Deliberately smaller than the supports below so the containment
-// rules have something to bite on.
+// A 400 x 300 x 900 sculpture standing on the floor.
 function supportedFloorArtwork(
   overrides: Partial<ArtworkFloorObject> = {}
 ): ArtworkFloorObject {
@@ -685,14 +683,14 @@ describe("migrateProject", () => {
     ).toThrow(/newer version of Sightlines/);
   });
 
-  it("migrates a v6 document to v7 untouched and refuses a document from a newer build", () => {
+  it("migrates a v6 document to v8 untouched and refuses a document from a newer build", () => {
     const sample = createSampleProject();
     const v6Document = { ...sample, schemaVersion: 6 };
 
     const migrated = migrateProject(v6Document);
 
-    // v6→v7 adds wall shelves; a v6 project carries none, so the chain's only
-    // edit is the version stamp itself.
+    // v6→v7 adds wall shelves and v7→v8 turns attached supports into objects; a
+    // v6 sample carries neither, so the chain's only edit is the version stamp.
     expect(migrated.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(migrated).toEqual({ ...sample, schemaVersion: CURRENT_SCHEMA_VERSION });
 
@@ -729,150 +727,203 @@ describe("migrateProject", () => {
     expect(() => parseProject(missingDepth)).toThrow();
   });
 
-  it("round-trips a floor support, absence included, and strips unknown keys", () => {
+  it("round-trips a support floor object, absence included, and strips unknown keys", () => {
     const project = createSampleProject();
-    const support: FloorSupport = {
-      kind: "plinth",
+    const support: SupportFloorObject = {
+      id: "support-1",
+      kind: "support",
+      supportKind: "plinth",
+      xMm: feetToMm(10),
+      yMm: feetToMm(5),
       widthMm: 900,
       depthMm: 900,
+      rotationDeg: 30,
       heightMm: 150,
-      offsetXMm: -50,
+      wallYMm: 0,
       overhangAllowed: false,
       bonnetHeightMm: 975,
       bonnetHeightLocked: true
     };
-    project.floorObjects = [supportedFloorArtwork({ support })];
+    project.floorObjects = [support];
 
     const parsed = parseProject(JSON.parse(JSON.stringify(project)));
-    const floorObject = parsed.floorObjects[0] as ArtworkFloorObject;
     // overhangAllowed:false is preserved AS FALSE — the schema never collapses
     // an explicit "chosen off" into "never chosen", or vice versa.
-    expect(floorObject.support).toEqual(support);
-    // offsetYMm was never written and must stay absent.
-    expect(floorObject.support).not.toHaveProperty("offsetYMm");
+    expect(parsed.floorObjects[0]).toEqual(support);
 
-    const unsupported = createSampleProject();
-    unsupported.floorObjects = [supportedFloorArtwork()];
-    expect(
-      (parseProject(unsupported).floorObjects[0] as ArtworkFloorObject).support
-    ).toBeUndefined();
+    const bare = createSampleProject();
+    const { overhangAllowed: _o, bonnetHeightMm: _b, bonnetHeightLocked: _l, ...plain } =
+      support;
+    bare.floorObjects = [plain];
+    const parsedBare = parseProject(JSON.parse(JSON.stringify(bare)));
+    expect(parsedBare.floorObjects[0]).not.toHaveProperty("bonnetHeightMm");
+    expect(parsedBare.floorObjects[0]).not.toHaveProperty("overhangAllowed");
 
-    // Unknown keys inside the support are stripped like everywhere else.
+    // Unknown keys are stripped like everywhere else.
     const withJunk = createSampleProject();
     withJunk.floorObjects = [
-      supportedFloorArtwork({
-        support: { ...support, bonnetColor: "smoke" } as unknown as FloorSupport
-      })
+      { ...support, bonnetColor: "smoke" } as unknown as SupportFloorObject
     ];
-    expect(
-      (parseProject(withJunk).floorObjects[0] as ArtworkFloorObject).support
-    ).not.toHaveProperty("bonnetColor");
+    expect(parseProject(withJunk).floorObjects[0]).not.toHaveProperty("bonnetColor");
+
+    // supportKind is REQUIRED — this member is not purely additive, which is
+    // what the v7→v8 bump is for.
+    const missingKind = createSampleProject();
+    const { supportKind: _k, ...withoutKind } = support;
+    missingKind.floorObjects = [withoutKind as unknown as SupportFloorObject];
+    expect(() => parseProject(missingKind)).toThrow();
   });
 
-  it("round-trips a support parked in an artwork's floor memory", () => {
+  it("rewrites v7 attached supports and monitor pedestals into floor objects", () => {
     const project = createSampleProject();
-    const wallObject: ArtworkWallObject = {
+    const wallId = project.floor.rooms[0].room.walls[0].id;
+
+    // (a) a sculpture on a plinth displaced in the placement's ROTATED local
+    //     frame: offset (100, 50) at 90° maps to floor (−50, +100).
+    const sculpture = {
+      ...supportedFloorArtwork({ id: "sculpture", xMm: 1000, yMm: 2000 }),
+      rotationDeg: 90,
+      support: {
+        kind: "plinth",
+        widthMm: 900,
+        depthMm: 800,
+        heightMm: 150,
+        offsetXMm: 100,
+        offsetYMm: 50,
+        overhangAllowed: false,
+        bonnetHeightMm: 975,
+        bonnetHeightLocked: true
+      }
+    };
+    // (b) a box monitor that never stated what it stands on — absent means the
+    //     800mm pedestal, and that reading has to survive as an object.
+    const monitorDefault = {
+      ...supportedFloorArtwork({ id: "monitor-default", xMm: 4000, yMm: 500 }),
+      artworkId: "art-monitor",
+      widthMm: 500,
+      depthMm: 450,
+      heightMm: 375
+    };
+    // (c) a box monitor explicitly on the bare floor: no pedestal, ever.
+    const monitorOnFloor = {
+      ...monitorDefault,
+      id: "monitor-floor",
+      xMm: 6000,
+      monitorSupport: "floor"
+    };
+    // (d) a captured work whose floorMemory still parks the old keys.
+    const captured: ArtworkWallObject & { floorMemory: Record<string, unknown> } = {
       id: "wo-captured",
       kind: "artwork",
       artworkId: "artwork-1",
-      wallId: project.floor.rooms[0].room.walls[0].id,
+      wallId,
       xMm: feetToMm(4),
       yMm: inchesToMm(57),
       widthMm: 400,
       heightMm: 900,
       floorMemory: {
         rotationDeg: 30,
+        baseHeightMm: 1100,
         support: { kind: "pedestal", widthMm: 600, depthMm: 500, heightMm: 1100 },
         monitorSupport: "floor"
       }
     };
-    project.wallObjects.push(wallObject);
 
-    const parsed = parseProject(JSON.parse(JSON.stringify(project)));
-    const restored = parsed.wallObjects.find(
-      (object) => object.id === wallObject.id
-    ) as ArtworkWallObject;
-    expect(restored.floorMemory).toEqual({
-      rotationDeg: 30,
-      support: { kind: "pedestal", widthMm: 600, depthMm: 500, heightMm: 1100 },
-      monitorSupport: "floor"
+    const v7Document = {
+      ...project,
+      schemaVersion: 7,
+      floorObjects: [sculpture, monitorDefault, monitorOnFloor],
+      wallObjects: [...project.wallObjects, captured]
+    };
+
+    const migrated = migrateProject(JSON.parse(JSON.stringify(v7Document)), {
+      artworks: [{ id: "art-monitor", title: "Video", displayAs: "monitor" }]
     });
+
+    expect(migrated.schemaVersion).toBe(8);
+
+    // ORDER: each support is inserted IMMEDIATELY BEFORE the work it carries,
+    // so it still draws beneath it.
+    expect(migrated.floorObjects.map((object) => object.kind)).toEqual([
+      "support",
+      "artwork",
+      "support",
+      "artwork",
+      "artwork"
+    ]);
+    expect(migrated.floorObjects[1]!.id).toBe("sculpture");
+    expect(migrated.floorObjects[3]!.id).toBe("monitor-default");
+    expect(migrated.floorObjects[4]!.id).toBe("monitor-floor");
+
+    // (a) the plinth, at the offset rotated into floor space: 90° gives
+    //     x = 1000 + 100·cos90 − 50·sin90 = 950, y = 2000 + 100·sin90 + 50·cos90 = 2100.
+    const plinth = migrated.floorObjects[0] as SupportFloorObject;
+    expect(plinth.supportKind).toBe("plinth");
+    expect(plinth.xMm).toBeCloseTo(950, 6);
+    expect(plinth.yMm).toBeCloseTo(2100, 6);
+    expect(plinth).toMatchObject({
+      widthMm: 900,
+      depthMm: 800,
+      heightMm: 150,
+      rotationDeg: 90,
+      wallYMm: 0,
+      bonnetHeightMm: 975,
+      bonnetHeightLocked: true,
+      overhangAllowed: false
+    });
+    expect(plinth.id).not.toBe("sculpture");
+    // The work's bottom edge IS the plinth's top face — that is what standing
+    // on it now means.
+    expect(migrated.floorObjects[1]!.baseHeightMm).toBe(150);
+
+    // (b) the monitor's implicit 800mm pedestal, at the cabinet's own footprint
+    //     and centre.
+    const pedestal = migrated.floorObjects[2] as SupportFloorObject;
+    expect(pedestal).toMatchObject({
+      kind: "support",
+      supportKind: "pedestal",
+      xMm: 4000,
+      yMm: 500,
+      widthMm: 500,
+      depthMm: 450,
+      rotationDeg: 0,
+      heightMm: 800,
+      wallYMm: 0
+    });
+    expect(migrated.floorObjects[3]!.baseHeightMm).toBe(800);
+
+    // (c) the monitor that said "floor" gets nothing and stays on the floor.
+    expect(migrated.floorObjects[4]!.baseHeightMm).toBeUndefined();
+
+    // (d) floorMemory keeps its angle and suspension height and loses the rest.
+    const restored = migrated.wallObjects.find(
+      (object) => object.id === "wo-captured"
+    ) as ArtworkWallObject;
+    expect(restored.floorMemory).toEqual({ rotationDeg: 30, baseHeightMm: 1100 });
+
+    // No `support` or `monitorSupport` key survives ANYWHERE.
+    expect(JSON.stringify(migrated)).not.toMatch(/"(support|monitorSupport)":/);
   });
 
-  it("normalises broken supports at the load boundary and counts them apart", () => {
+  it("leaves a box monitor's pedestal unmade when the migration gets no artworks", () => {
+    // The one caller that cannot supply a library is a bare project-JSON
+    // import: the file never says the work is a monitor, so nothing here may
+    // invent a pedestal under it.
     const project = createSampleProject();
-    project.floorObjects = [
-      // A pedestal dragged clean off its sculpture: offset far beyond any
-      // overlap, with overhang explicitly allowed.
-      supportedFloorArtwork({
-        id: "detached",
-        support: {
-          kind: "pedestal",
-          widthMm: 600,
-          depthMm: 500,
-          heightMm: 1100,
-          overhangAllowed: true,
-          offsetXMm: 9000
-        }
-      }),
-      // Overhang off, but the block is smaller than the work standing on it.
-      supportedFloorArtwork({
-        id: "undersized",
-        support: { kind: "pedestal", widthMm: 100, depthMm: 100, heightMm: 1100 }
-      }),
-      // A bonnet height imported from a build with different headroom, on an
-      // UNLOCKED bonnet: it must be re-derived, never trusted.
-      supportedFloorArtwork({
-        id: "stale-bonnet",
-        support: {
-          kind: "pedestal",
-          widthMm: 900,
-          depthMm: 900,
-          heightMm: 1100,
-          bonnetHeightMm: 5000
-        }
-      }),
-      // A lock flag with nothing to lock.
-      supportedFloorArtwork({
-        id: "orphan-lock",
-        support: {
-          kind: "pedestal",
-          widthMm: 600,
-          depthMm: 500,
-          heightMm: 1100,
-          bonnetHeightLocked: true
-        }
-      }),
-      // Already sound: it must not be counted.
-      supportedFloorArtwork({
-        id: "sound",
-        support: { kind: "pedestal", widthMm: 600, depthMm: 500, heightMm: 1100 }
-      })
-    ];
-
-    const { project: opened, repairedCount, supportRepairCount } =
-      migrateProjectWithReport(JSON.parse(JSON.stringify(project)));
-
-    expect(supportRepairCount).toBe(4);
-    // Emphatically NOT folded into repairedCount, whose copy means "invalid
-    // shared-opening pairs disconnected".
-    expect(repairedCount).toBe(0);
-
-    const byId = new Map(
-      opened.floorObjects.map((object) => [object.id, object as ArtworkFloorObject])
-    );
-    // Positive overlap only: (600 + 400) / 2 − 1.
-    expect(byId.get("detached")!.support!.offsetXMm).toBe(499);
-    expect(byId.get("undersized")!.support).toMatchObject({ widthMm: 400, depthMm: 300 });
-    // 900 (the work) + 75 headroom.
-    expect(byId.get("stale-bonnet")!.support!.bonnetHeightMm).toBe(975);
-    expect(byId.get("orphan-lock")!.support).not.toHaveProperty("bonnetHeightLocked");
-    expect(byId.get("sound")!.support).toEqual({
-      kind: "pedestal",
-      widthMm: 600,
-      depthMm: 500,
-      heightMm: 1100
+    const monitor = {
+      ...supportedFloorArtwork({ id: "monitor", xMm: 4000, yMm: 500 }),
+      artworkId: "art-monitor",
+      widthMm: 500,
+      depthMm: 450,
+      heightMm: 375
+    };
+    const migrated = migrateProject({
+      ...project,
+      schemaVersion: 7,
+      floorObjects: [monitor]
     });
+    expect(migrated.floorObjects.map((object) => object.kind)).toEqual(["artwork"]);
+    expect(migrated.floorObjects[0]!.baseHeightMm).toBeUndefined();
   });
 
   it("round-trips a v2 document that already has floor objects", () => {

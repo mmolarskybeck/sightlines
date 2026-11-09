@@ -6,7 +6,6 @@ import {
   monitorImageSizeMm,
   monitorPlanGlyph,
   monitorScreenRectMm,
-  resolveMonitorSupport,
   MONITOR_ASPECT_RATIO,
   MONITOR_BEZEL_MM,
   MONITOR_DEFAULT_WIDTH_MM,
@@ -36,20 +35,6 @@ describe("isMonitorArtwork", () => {
 
   it("reads a missing record as a framed image rather than throwing", () => {
     expect(isMonitorArtwork(undefined)).toBe(false);
-  });
-});
-
-describe("resolveMonitorSupport", () => {
-  it("absent means pedestal", () => {
-    expect(resolveMonitorSupport(undefined)).toBe("pedestal");
-  });
-
-  it("an explicit pedestal is the same answer as absent", () => {
-    expect(resolveMonitorSupport("pedestal")).toBe("pedestal");
-  });
-
-  it("standing on the bare floor is the only way to lose the pedestal", () => {
-    expect(resolveMonitorSupport("floor")).toBe("floor");
   });
 });
 

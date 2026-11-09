@@ -6564,7 +6564,10 @@ body.panels-resizing * {
 /* Read-only values use --muted because --subtle misses AA at this size.
    flex-wrap is the Support row's escape valve: label + value + a short
    action (e.g. "Add shelf") usually fit one line, but a longer pairing wraps
-   the action onto its own line rather than truncating the value. */
+   the action onto its own line rather than truncating the value. Keeping the
+   VALUE short is therefore the caller's job, not the layout's — that is what
+   `hint` below is for; a three-column grid was tried instead and made the
+   wall row's "Hung on the wall" wrap inside its own cell, which is worse. */
 .inspector-summary-row {
   display: flex;
   flex-wrap: wrap;
@@ -6596,6 +6599,16 @@ body.panels-resizing * {
   /* When the row wraps, the action drops to its own line flush with the
      value's right edge instead of hugging the label's left edge. */
   margin-inline-start: auto;
+}
+
+/* The value's qualifier on a line of its own: right-aligned so it reads as a
+   continuation of the value rather than of the label. The negative margin
+   cancels most of the row's own 8px wrap gap — this pair is tight by design
+   (value then qualifier), unlike a wrapped action, which keeps the full gap. */
+.inspector-summary-row-hint {
+  flex: 0 0 100%;
+  margin-top: calc(var(--space-6) * -1);
+  text-align: right;
 }
 
 /* Notice tone pairings maintain WCAG AA contrast. */
@@ -6702,104 +6715,6 @@ body.panels-resizing * {
 
 .floor-artwork-image-faces .inspector-action-group-buttons > *:hover:not([data-state="on"]) {
   border-color: var(--input);
-}
-
-/* The support-vs-work size note: a footnote to the Width/Depth/Height fields
-   directly above it, not a status. The element carries `.field-hint` too, so it
-   IS the same species as the hint lines InspectorRow renders under a control —
-   muted, --type-xs, --leading-copy — and only the payload and the action are
-   styled here. The filled InspectorNotice card it replaces read
-   as an alert box for a quiet factual aside; DESIGN.md keeps inspector panels
-   flat and reserves fills and shadows for real overlays. OpeningInspector draws
-   the same line: its HEALTHY pairing states itself as icon-less muted text with
-   a trailing ghost verb, and only a state that needs attention escalates to the
-   filled wash. A support resized on purpose is the healthy case.
-
-   NOTE: `margin-top` below only lands because this block sits AFTER `.field-hint`
-   in source order — both are single-class selectors, so nothing but order
-   separates them. Moving this earlier in the file would silently restore
-   `.field-hint`'s `margin: 0`. */
-.floor-artwork-image-size-note {
-  /* Bind the note to the numbers it annotates: 6px above (pulled in from the
-     section body's 10px grid gap), a full 10px below to the "Image on" grid.
-     Tight group, generous separation. */
-  margin-top: calc(var(--space-4) * -1);
-  /* Only bites on a pathological unbreakable value, and keeps the note's
-     min-content width off the inspector grid's floor at 260px. */
-  overflow-wrap: anywhere;
-}
-
-/* The payload. Ink and tabular numerals lift the measurement out of the muted
-   sentence so it can be read at a glance against the fields above — the same
-   move .length-field-hint makes for its conversion preview. nowrap keeps
-   "152.4 cm × 121.9 cm" from breaking around the × (it is ~118px at the 219px
-   content width of a 260px inspector, so it never needs to). */
-.floor-artwork-image-size-note-value {
-  color: var(--ink);
-  font-weight: var(--weight-medium);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-/* Inline text action, the .settings-link tertiary species tinted petrol: this
-   one writes numbers into the fields above rather than opening a page, and
-   petrol is the app's interaction ink. `white-space: nowrap` means the label
-   moves to the next line whole, so it can never break mid-word and never
-   strands a focus ring across two fragments.
-
-   `padding-block` buys hit area, and it DOES pay for it in line height —
-   measured, not assumed. The familiar rule that vertical padding on an inline
-   box leaves the line box alone holds for a <span> (18.6px either way) but not
-   for a <button>, which Chromium lays out as an ATOMIC inline-level box
-   whatever `display` says: the same 8px padding takes its line from 18.6px to
-   34.6px, identically under `inline` and `inline-block`. So the coarse-pointer
-   branch below genuinely grows the note (~41px to ~53px). That is the right
-   trade — a 35px target beats 12px of saved height on a device with no cursor —
-   but it is a trade, not a free lunch, so do not "restore" a tighter line by
-   removing that padding without knowing what it costs on touch. */
-.floor-artwork-image-size-note-action {
-  display: inline;
-  padding: 0;
-  padding-block: var(--space-2);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--primary);
-  font: inherit;
-  white-space: nowrap;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 2px;
-  cursor: pointer;
-  transition:
-    color 150ms ease-out,
-    background-color 150ms ease-out;
-}
-
-.floor-artwork-image-size-note-action:hover {
-  color: var(--primary-strong);
-  text-decoration-thickness: 2px;
-}
-
-.floor-artwork-image-size-note-action:active {
-  background: var(--primary-soft);
-  color: var(--primary-strong);
-  text-decoration-thickness: 2px;
-}
-
-.floor-artwork-image-size-note-action:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 1px;
-}
-
-/* Touch: a 35px target instead of 23px, at the cost of ~12px of note height
-   (see the measurement note above — a <button> is atomic, so this is not free).
-   PRODUCT.md asks for touch-sized targets on tablet, and the inspector is a
-   first-class iPad surface. */
-@media (any-pointer: coarse) {
-  .floor-artwork-image-size-note-action {
-    padding-block: var(--space-8);
-  }
 }
 
 /* Wall additions are peer actions, not a card grid. A single scan line keeps
@@ -8272,7 +8187,7 @@ body.panels-resizing * {
    one ghost family can be tuned without silently restyling the others.
    vector-effect is set per child in the component (it doesn't reliably inherit
    from a group). */
-.elevation-supported-artwork-ghost {
+.elevation-support-ghost {
   fill: none;
   stroke: var(--subtle);
   stroke-width: 1.5;
@@ -8281,7 +8196,7 @@ body.panels-resizing * {
   pointer-events: none;
 }
 
-.elevation-supported-artwork-ghost rect {
+.elevation-support-ghost rect {
   fill: none;
 }
 
@@ -8289,7 +8204,7 @@ body.panels-resizing * {
    the suspension wires wear, and for the same reason — it explains that there
    is a cover without competing with the outlines a curator is aligning
    against. */
-.elevation-supported-artwork-ghost .supported-artwork-ghost-bonnet {
+.elevation-support-ghost .support-ghost-bonnet {
   stroke-width: 1;
   stroke-dasharray: 3 4;
   opacity: 0.85;
@@ -8538,28 +8453,17 @@ body.panels-resizing * {
   opacity: 1;
 }
 
-/* The pedestal / plinth a floor work STANDS ON (PlanObject.tsx's `support`,
-   resolved in mm-space by supportGlyphs.ts). Opaque like the outline it sits
-   under — a pedestal is a solid volume seen from above, not a floating
-   annotation — but a step LIGHTER in stroke, because the work on top is the
-   thing being read and the support is what carries it. Declared after the
-   outline family so these rules win on source order at equal specificity.
-
-   pointer-events:all deliberately, and only off a ghost: the support is part of
-   the same hit target as the work (one assembly, one placement), so clicking
-   the reveal around a sculpture selects and drags the sculpture. Same
-   ghost-exclusion reasoning as .plan-object-outline's rule — a more-specific
-   child rule would otherwise override a ghost group's pointer-events:none and
-   let a click-to-place click land on the preview under the pointer. */
-.plan-object-support {
+/* A pedestal or plinth seen from above (a `kind: "support"` plan object,
+   schema v8). Opaque like the case and artwork outlines — a pedestal is a solid
+   volume seen from above, not a floating annotation — but a step LIGHTER in
+   stroke, because the works standing on it are what is being read and the
+   support is what carries them. It draws BEFORE them (planScene emits supports
+   first), so their own outlines overdraw the seam where the two meet. */
+.plan-object--support .plan-object-outline {
   fill: var(--surface-strong);
+  fill-opacity: 1;
   stroke: var(--muted);
   stroke-width: 1.25;
-  vector-effect: non-scaling-stroke;
-}
-
-.plan-object:not(.is-ghost) .plan-object-support {
-  pointer-events: all;
 }
 
 /* Dashed at the SAME footprint as the support (bonnet footprint = support
@@ -8575,19 +8479,8 @@ body.panels-resizing * {
   pointer-events: none;
 }
 
-/* Selection and refusal travel across the WHOLE assembly, matching the
-   outline/mark recolors above: selecting a sculpture on a plinth must not leave
-   the plinth looking unselected beside it. */
-.plan-object.is-selected .plan-object-support {
-  stroke: var(--selection);
-}
-
 .plan-object.is-selected .plan-object-support-bonnet {
   stroke: var(--selection);
-}
-
-.plan-object.is-invalid .plan-object-support {
-  stroke: var(--danger);
 }
 
 .plan-object.is-invalid .plan-object-support-bonnet {
@@ -9964,21 +9857,9 @@ button.import-conflict-headtext:hover .import-conflict-caret { color: var(--ink)
   opacity: 0.85;
 }
 
-/* The plexi bonnet over a cabinet on an explicit plinth: the same finer dash
-   the screen above takes, and for the same reason — it is glass, and it must
-   not compete with the volumes a curator is aligning against. Identical to
-   .supported-artwork-ghost-bonnet, stated here because the two ghost families
-   are deliberately styled apart. */
-.elevation-monitor-ghost .monitor-ghost-bonnet {
-  stroke-width: 1;
-  stroke-dasharray: 3 4;
-  opacity: 0.85;
-}
-
-/* The floor-support switches in the artwork inspector ("Allow overhang" and
-   "Plexi bonnet" in FloorSupportFields). Inherited verbatim from the
-   .monitor-support-switch rules that dressed the old "On pedestal" switch,
-   whose question the "Stands on" select now asks (MonitorSupportField is gone).
+/* The floor-support switches ("Allow overhang", "Plexi bonnet"). Kept for the
+   SupportInspector the floor-supports spec §7 round builds; the attached-support
+   fields they dressed are gone.
    Track geometry, which the shared Switch primitive deliberately leaves to its
    consumers: the same 34×20 pill .settings-switch and .export-switch-control
    use, so the 14px thumb (inset 2px) sits with symmetric margins and the
@@ -10002,16 +9883,6 @@ button.import-conflict-headtext:hover .import-conflict-caret { color: var(--ink)
   transform: translateX(14px);
 }
 
-/* The support block's own fields sit in the same vertical rhythm as the
-   placement fields above them — no fill, no border: DESIGN.md keeps inspector
-   panels flat, and a card here would read as a second panel rather than more
-   of the same form. */
-.support-fields {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-8);
-}
-
 /* Bonnet height + its lock toggle on one line. The toggle aligns to the
    field's INPUT, not to the row, so it sits level with the box it governs
    rather than floating beside the label. */
@@ -10032,10 +9903,6 @@ button.import-conflict-headtext:hover .import-conflict-caret { color: var(--ink)
    focusable and editable, which is the whole affordance. */
 .support-bonnet-height.derived input {
   color: var(--muted-foreground);
-}
-
-.support-bonnet-fit {
-  align-self: flex-start;
 }
 
 /* ==========================================================================

@@ -826,10 +826,8 @@ export function createPackageSlice(
       // Sightlines project whose data fails validation. The current
       // project is never touched until that pipeline has fully succeeded.
       let repairedCount = 0;
-      let supportRepairCount = 0;
       try {
-        ({ project, repairedCount, supportRepairCount } =
-          migrateProjectJsonWithReport(text));
+        ({ project, repairedCount } = migrateProjectJsonWithReport(text));
       } catch (error) {
         const message = `Import failed: ${
           error instanceof Error ? error.message : "the file could not be read."
@@ -851,19 +849,6 @@ export function createPackageSlice(
             : `${repairedCount} invalid shared openings were disconnected while opening this project.`
         );
       }
-      // A DIFFERENT repair with its own count and its own words: the load
-      // normaliser re-fitted a floor support to the work standing on it (an
-      // undersized pedestal, a detached offset, a stale bonnet height). Folding
-      // it into the openings count above would make that sentence a lie — see
-      // migrateProjectWithReport's supportRepairCount.
-      if (supportRepairCount > 0) {
-        toast.warning(
-          supportRepairCount === 1
-            ? "One pedestal was re-fitted to the work standing on it while opening this project."
-            : `${supportRepairCount} pedestals were re-fitted to the works standing on them while opening this project.`
-        );
-      }
-      // The load repair may have changed the document; persist what was opened.
       await persist(opened);
       // The swap cleared this document's sync state, and an id-preserving
       // re-import of a linked project's own export leaves App's project-keyed

@@ -26,10 +26,12 @@ test("the inspector's Type control moves the work between wall and floor", async
   const placementType = inspector.getByRole("radiogroup", { name: "Placement type" });
   await placementType.getByRole("radio", { name: "Floor", exact: true }).click();
 
-  // The retitled section IS the confirmation — and the floor-only fields that
-  // arrive with it prove an actual floor object now exists, not just a relabel.
+  // The retitled section IS the confirmation — and the floor-only Support row
+  // that arrives with it proves an actual floor object now exists, not just a
+  // relabel (floor-supports spec §7: "On the floor" with Put on pedestal).
   await expect(inspector).toContainText("Position on floor");
-  await expect(inspector.getByLabel("Height off floor")).toBeVisible();
+  await expect(inspector).toContainText("On the floor");
+  await expect(inspector.getByRole("button", { name: "Put on pedestal" })).toBeVisible();
   await expect(inspector).not.toContainText(/Position on .* wall/);
 
   // One undo, not two: the conversion deliberately skips the placementForm

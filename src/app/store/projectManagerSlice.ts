@@ -27,9 +27,8 @@ export type ProjectManagerSliceInternals = {
   // document, writes the repaired copy back once that snapshot has landed. The
   // write-back is skipped (leaving the repair in memory on an "idle" badge) when
   // the snapshot failed or when the open document moved on during the wait.
-  // `stored` is the document as the repository read it before the support
-  // repair (ProjectLoadReport.stored); passing it is what makes that repair
-  // durable — see openLoadedDocument in store.ts.
+  // `stored` is the document as the repository read it
+  // (ProjectLoadReport.stored) — see openLoadedDocument in store.ts.
   openLoadedDocument: (
     project: Project,
     extras?: Partial<AppState>,
@@ -37,9 +36,6 @@ export type ProjectManagerSliceInternals = {
   ) => Promise<Project>;
   // Populate recoveryOffer from the newest schema-valid snapshot, if any.
   offerRecovery: (projectId: string) => Promise<boolean>;
-  // Announce floor supports the load normaliser had to re-fit on the way in
-  // (0 says nothing). Owned by store.ts so every load path words it the same.
-  reportSupportRepairs: (supportRepairCount: number) => void;
 };
 
 export function createProjectManagerSlice(
@@ -47,7 +43,7 @@ export function createProjectManagerSlice(
   get: () => AppState,
   internals: ProjectManagerSliceInternals
 ): { actions: ProjectManagerSliceActions } {
-  const { setDocument, persist, deps, openLoadedDocument, offerRecovery, reportSupportRepairs } =
+  const { setDocument, persist, deps, openLoadedDocument, offerRecovery } =
     internals;
 
   const actions: ProjectManagerSliceActions = {
@@ -94,18 +90,10 @@ export function createProjectManagerSlice(
       set({ saveState: "saving", error: null });
 
       try {
-        // loadWithReport, not load: opening a project is the everyday path, and
-        // a pedestal the load normaliser had to re-fit is a visible change to
-        // someone's plan — it gets said out loud here, once the document is on
-        // screen, rather than discovered later.
-        const { project, supportRepairCount, stored } =
-          await deps.projectRepository.loadWithReport(id);
-        // saveState:"saved" describes the document as LOADED; if the load
-        // repair changed it, openLoadedDocument writes the repaired copy back
-        // (behind the recovery snapshot) so that stays true — or, when it can't
-        // safely write, downgrades the badge to "idle" rather than lie.
+        const { project, stored } = await deps.projectRepository.loadWithReport(id);
+        // saveState:"saved" describes the document as LOADED; openLoadedDocument
+        // writes back only when `stored` and `project` actually differ.
         await openLoadedDocument(project, { viewMode: "plan", saveState: "saved" }, stored);
-        reportSupportRepairs(supportRepairCount);
       } catch (error) {
         const message = `Could not open that project (${
           error instanceof Error ? error.message : "unknown error"

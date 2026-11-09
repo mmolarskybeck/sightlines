@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { getPlaceableFloorWalls, type FloorWall } from "../../../domain/geometry/planObjects";
-import type { Floor, Project, Room, ShelfWallObject } from "../../../domain/project";
+import type {
+  Floor,
+  FloorObject,
+  Project,
+  Room,
+  ShelfWallObject,
+  SupportFloorObject
+} from "../../../domain/project";
 import { MM_TO_WORLD } from "./coordinates";
 import type { DropDimsMm } from "./dropTarget";
 import {
@@ -76,11 +83,16 @@ const wallSource: ThreeDragSource = {
   dims
 };
 
+// No `kind` — same as a caller with none to hand (blocked-zone, case, or a
+// legacy call site): resolveDragMove's seating arithmetic is gated on
+// `kind === "artwork"`, so this fixture keeps the un-seated behaviour every
+// pre-support test below still exercises.
 const floorSource: ThreeDragSource = {
   anchor: "floor",
   objectId: "obj-2",
   xMm: 1000,
   yMm: 800,
+  rotationDeg: 0,
   dims
 };
 
@@ -274,6 +286,29 @@ describe("projectWithDragPreview", () => {
         depthMm: 400,
         heightMm: 900,
         rotationDeg: 0
+      },
+      {
+        id: "support-1",
+        kind: "support",
+        supportKind: "pedestal",
+        xMm: 3000,
+        yMm: 2000,
+        widthMm: 400,
+        depthMm: 400,
+        heightMm: 900,
+        rotationDeg: 0
+      },
+      {
+        id: "rider-1",
+        kind: "artwork",
+        artworkId: "a3",
+        xMm: 3050,
+        yMm: 2000,
+        widthMm: 200,
+        depthMm: 200,
+        heightMm: 300,
+        rotationDeg: 0,
+        baseHeightMm: 900
       }
     ]
   } as unknown as Project;
@@ -313,6 +348,56 @@ describe("projectWithDragPreview", () => {
     });
     expect(next.floorObjects[0]).toMatchObject({ xMm: 2500, yMm: 1750 });
     expect(next.wallObjects).toBe(project.wallObjects);
+  });
+
+  it("carries a SUPPORT's riders along with it in the live preview", () => {
+    const next = projectWithDragPreview(project, "support-1", {
+      anchor: "floor",
+      xMm: 3200,
+      yMm: 2100,
+      riders: [{ id: "rider-1", xMm: 3250, yMm: 2100 }]
+    });
+
+    expect(next.floorObjects.find((object) => object.id === "support-1")).toMatchObject({
+      xMm: 3200,
+      yMm: 2100
+    });
+    expect(next.floorObjects.find((object) => object.id === "rider-1")).toMatchObject({
+      xMm: 3250,
+      yMm: 2100
+    });
+    // The untouched artwork is left by reference.
+    expect(next.floorObjects.find((object) => object.id === "obj-2")).toBe(
+      project.floorObjects[0]
+    );
+  });
+
+  it("lifts a dragged artwork to the captured support's top face for the preview only", () => {
+    const next = projectWithDragPreview(project, "obj-2", {
+      anchor: "floor",
+      xMm: 3000,
+      yMm: 2000,
+      supportId: "support-1",
+      previewBaseHeightMm: 900
+    });
+
+    expect(next.floorObjects.find((object) => object.id === "obj-2")).toMatchObject({
+      xMm: 3000,
+      yMm: 2000,
+      baseHeightMm: 900
+    });
+  });
+
+  it("leaves baseHeightMm untouched when the move carries no seat candidate", () => {
+    const next = projectWithDragPreview(project, "obj-2", {
+      anchor: "floor",
+      xMm: 1200,
+      yMm: 900
+    });
+
+    const moved = next.floorObjects.find((object) => object.id === "obj-2");
+    expect(moved).toMatchObject({ xMm: 1200, yMm: 900 });
+    expect(moved?.baseHeightMm).toBeUndefined();
   });
 });
 
@@ -515,6 +600,147 @@ describe("resolveDragMove shelf assembly", () => {
       walls
     });
     expect(hopped).toMatchObject({ wallId: "wall-1", xMm: 1000, yMm: 1200 });
+  });
+});
+
+// A SUPPORT dragged in 3D: the pedestal plus the works standing on it, moved
+// as one rigid body — the floor twin of the shelf assembly above, minus the
+// wall clamp (a floor drag never hops onto a wall run).
+describe("resolveDragMove support assembly", () => {
+  const noOffset = { xMm: 0, yMm: 0 };
+
+  const supportSource: ThreeDragSource = {
+    anchor: "floor",
+    objectId: "support-1",
+    kind: "support",
+    xMm: 1000,
+    yMm: 1000,
+    rotationDeg: 0,
+    dims: { wallWidthMm: 400, wallHeightMm: 900, floorWidthMm: 400, floorDepthMm: 400 },
+    riders: [
+      { id: "work-a", offsetMm: { xMm: 50, yMm: 0 } },
+      { id: "work-b", offsetMm: { xMm: -50, yMm: 20 } }
+    ]
+  };
+
+  it("carries every rider by the support's own delta", () => {
+    const move = resolveDragMove({
+      surface: floorSurface(1500, 1300),
+      source: supportSource,
+      offsetMm: noOffset,
+      walls
+    });
+
+    expect(move).toEqual({
+      anchor: "floor",
+      xMm: 1500,
+      yMm: 1300,
+      riders: [
+        { id: "work-a", xMm: 1550, yMm: 1300 },
+        { id: "work-b", xMm: 1450, yMm: 1320 }
+      ]
+    });
+  });
+});
+
+// A floor ARTWORK dragged over a support (floor-supports spec §4): it seats
+// on the widest-overlapping support, previews at that support's top face, and
+// clamps onto the support it started ON while the precision bypass is held
+// off.
+describe("resolveDragMove support seating", () => {
+  const noOffset = { xMm: 0, yMm: 0 };
+
+  const support: SupportFloorObject = {
+    id: "support-1",
+    kind: "support",
+    supportKind: "pedestal",
+    xMm: 1500,
+    yMm: 1300,
+    widthMm: 400,
+    depthMm: 400,
+    heightMm: 900,
+    rotationDeg: 0,
+    wallYMm: 0
+  };
+  const floorObjects: FloorObject[] = [support];
+
+  const artworkSource: ThreeDragSource = {
+    anchor: "floor",
+    objectId: "work-1",
+    kind: "artwork",
+    xMm: 1000,
+    yMm: 1000,
+    rotationDeg: 0,
+    dims: { wallWidthMm: 300, wallHeightMm: 300, floorWidthMm: 300, floorDepthMm: 300 }
+  };
+
+  it("seats on the support its footprint overlaps and previews its top height", () => {
+    const move = resolveDragMove({
+      surface: floorSurface(1500, 1300),
+      source: artworkSource,
+      offsetMm: noOffset,
+      walls,
+      floorObjects,
+      seatOnSupports: true
+    });
+
+    expect(move).toMatchObject({
+      anchor: "floor",
+      xMm: 1500,
+      yMm: 1300,
+      supportId: "support-1",
+      previewBaseHeightMm: 900,
+      bypassSeating: false
+    });
+  });
+
+  it("reports no seat when the drag lands over open floor", () => {
+    const move = resolveDragMove({
+      surface: floorSurface(4000, 4000),
+      source: artworkSource,
+      offsetMm: noOffset,
+      walls,
+      floorObjects,
+      seatOnSupports: true
+    });
+
+    expect(move).toMatchObject({ anchor: "floor", xMm: 4000, yMm: 4000 });
+    expect(move!.anchor === "floor" ? move!.supportId : undefined).toBeUndefined();
+  });
+
+  it("drags free with no seat and no bypass flag while the precision bypass is held", () => {
+    const move = resolveDragMove({
+      surface: floorSurface(1500, 1300),
+      source: artworkSource,
+      offsetMm: noOffset,
+      walls,
+      floorObjects,
+      seatOnSupports: false
+    });
+
+    expect(move).toEqual({ anchor: "floor", xMm: 1500, yMm: 1300, bypassSeating: true });
+  });
+
+  it("clamps onto the support the work started on when it is dragged past the edge", () => {
+    const riderSource: ThreeDragSource = {
+      ...artworkSource,
+      objectId: "work-1",
+      startingSupportId: "support-1"
+    };
+    // Dragged far past the support's right edge.
+    const move = resolveDragMove({
+      surface: floorSurface(9000, 1300),
+      source: riderSource,
+      offsetMm: noOffset,
+      walls,
+      floorObjects,
+      seatOnSupports: true
+    });
+
+    expect(move).not.toBeNull();
+    const xMm = move!.anchor === "floor" ? move!.xMm : NaN;
+    expect(xMm).toBeLessThan(9000);
+    expect(move).toMatchObject({ supportId: "support-1", previewBaseHeightMm: 900 });
   });
 });
 

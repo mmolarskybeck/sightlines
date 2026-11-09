@@ -129,9 +129,10 @@ export function planObjectMarks(
   // recomputed here: the preview drifting from the artifact it previews is
   // exactly the failure this module's shared-glyph rule exists to prevent.
   swing?: DoorSwingPlanGlyph,
-  // The pedestal/plinth this floor placement stands on, off the same scene
-  // entry the canvas and the PDF writer read (PlanSceneFloorObject.support).
-  support?: { rect: PlanRect; hasBonnet: boolean }
+  // This SUPPORT carries a plexi bonnet, off the same scene entry the canvas
+  // and the PDF writer read (PlanSceneFloorObject.hasBonnet). Ignored for every
+  // other kind.
+  hasBonnet?: boolean
 ): JSX.Element {
   const world = (xMm: number, yMm: number) =>
     xf.point(localToWorld(rect, xMm, yMm));
@@ -331,35 +332,28 @@ export function planObjectMarks(
 
   return (
     <Fragment key={key}>
-      {/* The support first, beneath the work, so the work's own outline
-          overdraws the seam where the two meet — the canvas's and the PDF
-          writer's paint order. Lighter stroke than the object standing on it;
-          the bonnet is the same footprint, dashed, since a plan cannot show
-          its height (USER DECISION 2026-09-17). */}
-      {support ? (
+      {/* A support is an opaque volume seen from above with a lighter stroke
+          than the works standing on it — the plan scene emits it BEFORE them,
+          so their outlines overdraw the seam where the two meet, the canvas's
+          and the PDF writer's paint order. */}
+      <polygon
+        points={rectPolyPoints(rect, xf)}
+        fill={kind === "blocked-zone" || kind === "support" ? FILL_WEAK : "#ffffff"}
+        stroke={MUTED}
+        strokeWidth={kind === "support" ? 0.55 : 0.8}
+        strokeDasharray={isFloor && kind !== "support" ? "3 2" : undefined}
+      />
+      {/* The bonnet is the same footprint, dashed, since a plan cannot show its
+          height (USER DECISION 2026-09-17). */}
+      {kind === "support" && hasBonnet ? (
         <polygon
-          points={rectPolyPoints(support.rect, xf)}
-          fill={FILL_WEAK}
-          stroke={MUTED}
-          strokeWidth={0.55}
-        />
-      ) : null}
-      {support?.hasBonnet ? (
-        <polygon
-          points={rectPolyPoints(support.rect, xf)}
+          points={rectPolyPoints(rect, xf)}
           fill="none"
           stroke={SUBTLE}
           strokeWidth={0.5}
           strokeDasharray="3 2"
         />
       ) : null}
-      <polygon
-        points={rectPolyPoints(rect, xf)}
-        fill={kind === "blocked-zone" ? FILL_WEAK : "#ffffff"}
-        stroke={MUTED}
-        strokeWidth={0.8}
-        strokeDasharray={isFloor ? "3 2" : undefined}
-      />
       {inner}
     </Fragment>
   );
@@ -510,7 +504,7 @@ export function planPageMarks(
             xf,
             `fobj-${i}`,
             undefined,
-            painted.entry.support
+            painted.entry.hasBonnet
           )
         );
       }

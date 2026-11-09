@@ -7,6 +7,7 @@ import type {
   CaseWallObject,
   ConnectableOpeningWallObject,
   ShelfWallObject,
+  SupportFloorObject,
   WallObject
 } from "../project";
 import { MONITOR_DEPTH_MM, MONITOR_PEDESTAL_HEIGHT_MM } from "../geometry/monitorGlyphs";
@@ -16,7 +17,6 @@ import {
   PARTITION_ABUT_THRESHOLD_MM,
   PARTITION_NEIGHBOR_MAX_GAP_MM,
   projectFloorObjectOntoWall,
-  projectSupportedFootprintOntoWall,
   wallLocalYToSvgY
 } from "./elevationScene";
 
@@ -428,7 +428,7 @@ describe("buildElevationScene suspended-artwork ghosts", () => {
 });
 
 // A floor-standing box monitor: the CABINET's geometry (a 4:3 face, 450 deep),
-// resting on the floor. `monitorSupport` absent = pedestal, the default.
+// resting on the floor. A pedestal, when there is one, is a separate object.
 function monitorPlacement(overrides: Partial<ArtworkFloorObject> = {}): ArtworkFloorObject {
   return {
     id: "floor-monitor",
@@ -459,7 +459,7 @@ const MONITOR_ARTWORKS: ReadonlyMap<string, Artwork> = new Map([
 ]);
 
 describe("buildElevationScene monitor ghosts", () => {
-  it("ghosts a floor-RESTING monitor, standing on the floor with its pedestal", () => {
+  it("ghosts a floor-RESTING monitor standing on the floor line", () => {
     const scene = buildElevationScene([], {
       ...WALL,
       artworksById: MONITOR_ARTWORKS,
@@ -473,21 +473,46 @@ describe("buildElevationScene monitor ghosts", () => {
       xMinMm: 2750, // center 3000 ± halfWidth 250
       xMaxMm: 3250,
       monitorHeightMm: 375,
-      // Absent monitorSupport resolves to a pedestal, HERE, at read time.
-      pedestalHeightMm: MONITOR_PEDESTAL_HEIGHT_MM
+      baseHeightMm: 0
     });
   });
 
-  it("drops the plinth when the monitor stands on the bare floor", () => {
+  it("stands a monitor RIDER's cabinet at the pedestal's top face", () => {
+    // The whole schema-v8 substitution: a cabinet on its 800mm pedestal is a
+    // placement with baseHeightMm 800, and the pedestal ghosts separately.
     const scene = buildElevationScene([], {
       ...WALL,
       artworksById: MONITOR_ARTWORKS,
-      floorArtworks: [monitorPlacement({ monitorSupport: "floor" })],
+      floorArtworks: [monitorPlacement({ baseHeightMm: MONITOR_PEDESTAL_HEIGHT_MM })],
+      floorSupports: [
+        {
+          id: "support-1",
+          kind: "support",
+          supportKind: "pedestal",
+          xMm: 3000,
+          yMm: 900,
+          widthMm: 500,
+          depthMm: MONITOR_DEPTH_MM,
+          rotationDeg: 0,
+          heightMm: MONITOR_PEDESTAL_HEIGHT_MM,
+          wallYMm: 0
+        }
+      ],
       wallStartFloorMm: WALL_START,
       wallEndFloorMm: WALL_END
     });
 
-    expect(scene.monitorGhosts[0]!.pedestalHeightMm).toBe(0);
+    expect(scene.monitorGhosts[0]!.baseHeightMm).toBe(MONITOR_PEDESTAL_HEIGHT_MM);
+    expect(scene.supportGhosts).toHaveLength(1);
+    expect(scene.supportGhosts[0]).toMatchObject({
+      objectId: "support-1",
+      xMinMm: 2750,
+      xMaxMm: 3250,
+      heightMm: MONITOR_PEDESTAL_HEIGHT_MM,
+      supportKind: "pedestal"
+    });
+    // A monitor is still never a suspended board, whatever its base height.
+    expect(scene.suspendedArtworkGhosts).toHaveLength(0);
   });
 
   it("emits nothing without the artwork join — the display type lives on the WORK", () => {
@@ -529,78 +554,98 @@ describe("buildElevationScene monitor ghosts", () => {
     expect(scene.monitorGhosts).toHaveLength(0);
     expect(scene.suspendedArtworkGhosts).toHaveLength(0);
   });
+});
 
-  it("LEGACY: a default-pedestal monitor's support span IS its cabinet span", () => {
-    // The whole safety argument for the two new span fields: the monitor
-    // default is a pedestal sized to its own cabinet and carrying no offset, so
-    // every pre-support monitor document produces a ghost whose support span
-    // equals the span it has always drawn. Nothing legacy moves.
+describe("buildElevationScene support ghosts", () => {
+  function pedestal(overrides: Partial<SupportFloorObject> = {}): SupportFloorObject {
+    return {
+      id: "support-1",
+      kind: "support",
+      supportKind: "pedestal",
+      xMm: 3000,
+      yMm: 900,
+      widthMm: 600,
+      depthMm: 600,
+      rotationDeg: 0,
+      heightMm: 1100,
+      wallYMm: 0,
+      ...overrides
+    };
+  }
+
+  it("projects a support onto the wall, rising from the floor line", () => {
     const scene = buildElevationScene([], {
       ...WALL,
-      artworksById: MONITOR_ARTWORKS,
-      floorArtworks: [monitorPlacement()],
+      floorSupports: [pedestal()],
       wallStartFloorMm: WALL_START,
       wallEndFloorMm: WALL_END
     });
 
-    const ghost = scene.monitorGhosts[0]!;
-    expect(ghost.supportXMinMm).toBe(ghost.xMinMm);
-    expect(ghost.supportXMaxMm).toBe(ghost.xMaxMm);
-    expect(ghost.bonnetHeightMm).toBeUndefined();
+    expect(scene.supportGhosts).toEqual([
+      {
+        objectId: "support-1",
+        xMinMm: 2700,
+        xMaxMm: 3300,
+        heightMm: 1100,
+        supportKind: "pedestal"
+      }
+    ]);
   });
 
-  it("carries an EXPLICIT plinth's own offset span and its bonnet", () => {
-    // Plan already draws this assembly whole (PlanSceneFloorObject.support);
-    // elevation used to shrink the plinth back to the cabinet and drop the
-    // bonnet entirely.
+  it("carries the bonnet height and the plinth kind", () => {
     const scene = buildElevationScene([], {
       ...WALL,
-      artworksById: MONITOR_ARTWORKS,
-      floorArtworks: [
-        monitorPlacement({
-          support: {
-            kind: "plinth",
-            widthMm: 900,
-            depthMm: 900,
-            heightMm: 150,
-            offsetXMm: 100,
-            bonnetHeightMm: 450
-          }
-        })
+      floorSupports: [
+        pedestal({ supportKind: "plinth", heightMm: 150, bonnetHeightMm: 450 })
       ],
       wallStartFloorMm: WALL_START,
       wallEndFloorMm: WALL_END
     });
 
-    expect(scene.monitorGhosts[0]).toMatchObject({
-      // The cabinet keeps its OWN span — a monitor on a wide plinth is still a
-      // 500mm monitor.
-      xMinMm: 2750,
-      xMaxMm: 3250,
-      monitorHeightMm: 375,
-      pedestalHeightMm: 150,
-      // The 900-wide plinth, shoved +100 along the placement's local x.
-      supportXMinMm: 2650,
-      supportXMaxMm: 3550,
-      bonnetHeightMm: 450
+    expect(scene.supportGhosts[0]).toMatchObject({
+      heightMm: 150,
+      bonnetHeightMm: 450,
+      supportKind: "plinth"
     });
-    // And it is still the monitor family, not the supported-artwork one.
-    expect(scene.supportedArtworkGhosts).toHaveLength(0);
   });
 
-  it("emits a bare-floor monitor's inert support span as its cabinet span", () => {
+  it("widens a ROTATED support's span, exactly as the case ghost does", () => {
     const scene = buildElevationScene([], {
       ...WALL,
-      artworksById: MONITOR_ARTWORKS,
-      floorArtworks: [monitorPlacement({ monitorSupport: "floor" })],
+      floorSupports: [pedestal({ rotationDeg: 45 })],
       wallStartFloorMm: WALL_START,
       wallEndFloorMm: WALL_END
     });
 
-    const ghost = scene.monitorGhosts[0]!;
-    expect(ghost.pedestalHeightMm).toBe(0);
-    expect(ghost.supportXMinMm).toBe(ghost.xMinMm);
-    expect(ghost.supportXMaxMm).toBe(ghost.xMaxMm);
+    const ghost = scene.supportGhosts[0]!;
+    // |600·cos45| + |600·sin45| ≈ 848.5, centred on 3000.
+    expect(ghost.xMaxMm - ghost.xMinMm).toBeCloseTo(848.53, 1);
+  });
+
+  it("emits nothing without the wall endpoints, and drops a support off the wall", () => {
+    expect(buildElevationScene([], { ...WALL, floorSupports: [pedestal()] }).supportGhosts)
+      .toHaveLength(0);
+    expect(
+      buildElevationScene([], {
+        ...WALL,
+        floorSupports: [pedestal({ xMm: -5000 })],
+        wallStartFloorMm: WALL_START,
+        wallEndFloorMm: WALL_END
+      }).supportGhosts
+    ).toHaveLength(0);
+  });
+
+  it("draws a RIDER through the existing suspended-artwork ghost at its base height", () => {
+    const scene = buildElevationScene([], {
+      ...WALL,
+      floorSupports: [pedestal()],
+      floorArtworks: [suspendedBoard({ baseHeightMm: 1100 })],
+      wallStartFloorMm: WALL_START,
+      wallEndFloorMm: WALL_END
+    });
+
+    expect(scene.supportGhosts).toHaveLength(1);
+    expect(scene.suspendedArtworkGhosts[0]).toMatchObject({ baseHeightMm: 1100 });
   });
 });
 
@@ -810,208 +855,5 @@ describe("buildElevationScene partition profiles", () => {
       })
     ]);
     expect(past.partitionProfiles[0]!.abutting).toBe(false);
-  });
-});
-
-// A sculpture standing on a pedestal: 400 × 300 work, 900 tall, on a 600 × 500
-// block 1100 tall. The union footprint is WIDER than the work, which is the
-// whole reason the ghost carries two spans.
-function supportedSculpture(
-  overrides: Partial<ArtworkFloorObject> = {}
-): ArtworkFloorObject {
-  return {
-    id: "floor-sculpture",
-    kind: "artwork",
-    artworkId: "art-sculpture",
-    xMm: 3000,
-    yMm: 1500,
-    widthMm: 400,
-    depthMm: 300,
-    rotationDeg: 0,
-    heightMm: 900,
-    wallYMm: 1450,
-    support: { kind: "pedestal", widthMm: 600, depthMm: 500, heightMm: 1100 },
-    ...overrides
-  };
-}
-
-const SCULPTURE_ARTWORKS: ReadonlyMap<string, Artwork> = new Map([
-  [
-    "art-sculpture",
-    {
-      id: "art-sculpture",
-      schemaVersion: 1,
-      dimensions: { status: "unknown" },
-      displayAs: "sculpture",
-      metadata: {}
-    } as Artwork
-  ]
-]);
-
-describe("buildElevationScene supported-artwork ghosts", () => {
-  it("ghosts a supported work with the union span and the work's own span", () => {
-    const scene = buildElevationScene([], {
-      ...WALL,
-      artworksById: SCULPTURE_ARTWORKS,
-      floorArtworks: [supportedSculpture()],
-      wallStartFloorMm: WALL_START,
-      wallEndFloorMm: WALL_END
-    });
-
-    expect(scene.supportedArtworkGhosts).toHaveLength(1);
-    expect(scene.supportedArtworkGhosts[0]).toEqual({
-      kind: "supported-artwork",
-      objectId: "floor-sculpture",
-      // The 600-wide pedestal, not the 400-wide work.
-      xMinMm: 2700,
-      xMaxMm: 3300,
-      supportHeightMm: 1100,
-      workHeightMm: 900,
-      workXMinMm: 2800,
-      workXMaxMm: 3200,
-      // Overhang off: the support IS the assembly here.
-      supportXMinMm: 2700,
-      supportXMaxMm: 3300
-    });
-    // Absent bonnet stays absent — the consumer draws no glass.
-    expect(scene.supportedArtworkGhosts[0]).not.toHaveProperty("bonnetHeightMm");
-  });
-
-  it("carries the bonnet height when there is a bonnet", () => {
-    const scene = buildElevationScene([], {
-      ...WALL,
-      artworksById: SCULPTURE_ARTWORKS,
-      floorArtworks: [
-        supportedSculpture({
-          support: {
-            kind: "pedestal",
-            widthMm: 600,
-            depthMm: 500,
-            heightMm: 1100,
-            bonnetHeightMm: 975
-          }
-        })
-      ],
-      wallStartFloorMm: WALL_START,
-      wallEndFloorMm: WALL_END
-    });
-
-    expect(scene.supportedArtworkGhosts[0]!.bonnetHeightMm).toBe(975);
-  });
-
-  it("ghosts a supported work standing on a plinth, never as a floating board", () => {
-    // A stale suspension height left behind by a work that was later stood on a
-    // plinth must not float it: the support owns the vertical state.
-    const scene = buildElevationScene([], {
-      ...WALL,
-      artworksById: SCULPTURE_ARTWORKS,
-      floorArtworks: [supportedSculpture({ baseHeightMm: 900 })],
-      wallStartFloorMm: WALL_START,
-      wallEndFloorMm: WALL_END
-    });
-
-    expect(scene.suspendedArtworkGhosts).toHaveLength(0);
-    expect(scene.supportedArtworkGhosts).toHaveLength(1);
-    expect(scene.supportedArtworkGhosts[0]!.supportHeightMm).toBe(1100);
-  });
-
-  it("emits nothing for an unsupported floor-resting work", () => {
-    const scene = buildElevationScene([], {
-      ...WALL,
-      artworksById: SCULPTURE_ARTWORKS,
-      floorArtworks: [supportedSculpture({ support: undefined, baseHeightMm: undefined })],
-      wallStartFloorMm: WALL_START,
-      wallEndFloorMm: WALL_END
-    });
-
-    expect(scene.supportedArtworkGhosts).toHaveLength(0);
-    expect(scene.suspendedArtworkGhosts).toHaveLength(0);
-  });
-
-  it("leaves monitors to the monitor ghost, on their pedestal or on a plinth", () => {
-    const onDefault = buildElevationScene([], {
-      ...WALL,
-      artworksById: MONITOR_ARTWORKS,
-      floorArtworks: [monitorPlacement()],
-      wallStartFloorMm: WALL_START,
-      wallEndFloorMm: WALL_END
-    });
-    expect(onDefault.supportedArtworkGhosts).toHaveLength(0);
-    // Unchanged by supports existing: the absent default still resolves to 800.
-    expect(onDefault.monitorGhosts[0]!.pedestalHeightMm).toBe(MONITOR_PEDESTAL_HEIGHT_MM);
-
-    const onPlinth = buildElevationScene([], {
-      ...WALL,
-      artworksById: MONITOR_ARTWORKS,
-      floorArtworks: [
-        monitorPlacement({
-          support: { kind: "plinth", widthMm: 900, depthMm: 900, heightMm: 150 }
-        })
-      ],
-      wallStartFloorMm: WALL_START,
-      wallEndFloorMm: WALL_END
-    });
-    expect(onPlinth.supportedArtworkGhosts).toHaveLength(0);
-    // An explicit block under the cabinet beats the 800mm default.
-    expect(onPlinth.monitorGhosts[0]!.pedestalHeightMm).toBe(150);
-  });
-});
-
-describe("projectSupportedFootprintOntoWall", () => {
-  const SUPPORT = { kind: "pedestal", widthMm: 600, depthMm: 500, heightMm: 1100 } as const;
-
-  it("reports the union span around the work's own", () => {
-    expect(
-      projectSupportedFootprintOntoWall(supportedSculpture(), SUPPORT, WALL_START, WALL_END)
-    ).toEqual({
-      xMinMm: 2700,
-      xMaxMm: 3300,
-      workXMinMm: 2800,
-      workXMaxMm: 3200,
-      // The support is centred on the work here, so its own span IS the union's
-      // — the three only diverge under an offset or an overhang.
-      supportXMinMm: 2700,
-      supportXMaxMm: 3300
-    });
-  });
-
-  it("reports the SUPPORT's own span, which an offset pulls off the union's", () => {
-    const projection = projectSupportedFootprintOntoWall(
-      supportedSculpture(),
-      { ...SUPPORT, offsetXMm: 100 },
-      WALL_START,
-      WALL_END
-    )!;
-    // Work spans 2800..3200; the 600-wide support, shoved +100 along the
-    // placement's local x, spans 2800..3400. The union is the pair.
-    expect(projection.supportXMinMm).toBe(2800);
-    expect(projection.supportXMaxMm).toBe(3400);
-    expect(projection.workXMinMm).toBe(2800);
-    expect(projection.workXMaxMm).toBe(3200);
-    expect(projection.xMinMm).toBe(2800);
-    expect(projection.xMaxMm).toBe(3400);
-  });
-
-  it("widens both spans for a rotated placement", () => {
-    const projection = projectSupportedFootprintOntoWall(
-      supportedSculpture({ rotationDeg: 45 }),
-      SUPPORT,
-      WALL_START,
-      WALL_END
-    );
-    // |600·cos45| + |500·sin45| ≈ 777.8, so the union is wider than 600.
-    expect(projection!.xMaxMm - projection!.xMinMm).toBeCloseTo(777.82, 1);
-    expect(projection!.workXMaxMm - projection!.workXMinMm).toBeCloseTo(494.97, 1);
-  });
-
-  it("returns null when the whole assembly misses the wall", () => {
-    expect(
-      projectSupportedFootprintOntoWall(
-        supportedSculpture({ xMm: 12000 }),
-        SUPPORT,
-        WALL_START,
-        WALL_END
-      )
-    ).toBeNull();
   });
 });

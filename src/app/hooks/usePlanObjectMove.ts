@@ -10,6 +10,7 @@ import {
   floatPolicyForKind,
   resolvePlanPlacement,
   type FloatPolicy,
+  type PlanMovingKind,
   type PlanPlacement
 } from "../../domain/snapping/planSnapTargets";
 import { resolveSnap, type Guide } from "../../domain/snapping/resolveSnap";
@@ -21,7 +22,13 @@ import {
   type PlanGroupMember
 } from "../../domain/snapping/planGroupMove";
 import { expandWithShelfRiders, getShelfRiders } from "../../domain/placement/shelfRiders";
-import type { Artwork, Project, WallObject, WallObjectBase } from "../../domain/project";
+import {
+  clampRiderOntoSupport,
+  expandWithSupportRiders,
+  resolveFloorStandsOn,
+  seatOnAnyOverlappingSupport
+} from "../../domain/placement/floorRiders";
+import type { Artwork, Project, WallObjectBase } from "../../domain/project";
 import { effectiveWallObjectPlanDepthMm } from "../../domain/placement/artworkForm";
 import { useDragGesture } from "./useDragGesture";
 import type { ObjectDragState } from "../components/plan/types";
@@ -57,15 +64,20 @@ export type PlanObjectMoveDeps = {
   snapThresholdMm: number;
   selectedObjectIds: string[];
   suppressNextSelect: () => void;
-  onCommitPlanMove?: (objectId: string, placement: PlanPlacement) => void;
+  onCommitPlanMove?: (
+    objectId: string,
+    placement: PlanPlacement,
+    bypassSeating?: boolean
+  ) => void;
   onCommitPlanMoveGroup?: (
-    moves: { id: string; xMm: number; yMm?: number; wallId?: string }[]
+    moves: { id: string; xMm: number; yMm?: number; wallId?: string }[],
+    bypassSeating?: boolean
   ) => void;
 };
 
 type BeginObjectDragParams = {
   objectId: string;
-  kind: WallObject["kind"];
+  kind: PlanMovingKind;
   startCenterMm: Vector2;
   movingSize: { widthMm: number; heightMm: number; depthMm: number };
   wallFootprintWidthMm?: number;
@@ -183,10 +195,54 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
       }
 
       // Preserve the grab offset by moving the center by pointer delta.
-      const proposedCenterMm: Vector2 = {
+      let proposedCenterMm: Vector2 = {
         xMm: current.startCenterMm.xMm + (pointerMm.xMm - current.startPointerMm.xMm),
         yMm: current.startCenterMm.yMm + (pointerMm.yMm - current.startPointerMm.yMm)
       };
+
+      // ⌘/Ctrl is the precision bypass: it already kills the grid tier and the
+      // neighbour threshold everywhere else, and here it also lifts the
+      // overhang clamp and the seat announcement, so a held modifier drags a
+      // work straight off its pedestal.
+      const bypassSeating = event.metaKey || event.ctrlKey;
+
+      // The support this work was standing on when the drag began, resolved
+      // once per frame from the PRE-drag state (current.ridesSupport) — the
+      // clamp has to keep asking about the pedestal the curator grabbed the
+      // work off, not whichever one it happens to be over now.
+      //
+      // HARD CLAMP, not a drag barrier: see clampRiderOntoSupport. The exits
+      // are "Set on floor" and a ⌘/Ctrl drag.
+      if (current.ridesSupport && !bypassSeating) {
+        proposedCenterMm = clampRiderOntoSupport(
+          {
+            id: current.objectId,
+            centerMm: proposedCenterMm,
+            widthMm: current.movingSize.widthMm,
+            depthMm: current.movingSize.depthMm,
+            rotationDeg: current.rotationDeg
+          },
+          current.ridesSupport
+        );
+      }
+
+      // The pedestal a release right now would stand this work on, so its plan
+      // glyph can light up while the work is captured over it. Floor artwork
+      // only: a support's own drag carries its riders rather than capturing
+      // them, and a wall-anchored work has no floor footprint to test.
+      const seatSupportId =
+        current.kind === "artwork" && !bypassSeating && current.startsOnFloor
+          ? (seatOnAnyOverlappingSupport(
+              {
+                id: current.objectId,
+                centerMm: proposedCenterMm,
+                widthMm: current.movingSize.widthMm,
+                depthMm: current.movingSize.depthMm,
+                rotationDeg: current.rotationDeg
+              },
+              project.floorObjects
+            )?.supportId ?? null)
+          : null;
 
       const proposedRoomId = roomIdContainingPoint(project, proposedCenterMm);
       const result = resolvePlanPlacement(proposedCenterMm, {
@@ -225,10 +281,17 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
         currentAnchorWallId:
           result.placement.anchor === "wall" ? result.placement.wallId : null,
         previousSnapTargetIds: result.snapTargetIds,
-        activeGuides: result.activeGuides
+        activeGuides: result.activeGuides,
+        // Only while the resolved anchor is still the floor: a work dragged up
+        // onto a wall is hanging, not standing on the pedestal it passed over.
+        seatSupportId: result.placement.anchor === "floor" ? seatSupportId : null
       };
     },
-    onRelease: (current) => {
+    onRelease: (current, event) => {
+      // ⌘/Ctrl at RELEASE decides the commit, matching every other precision
+      // bypass in the app: the modifier is read where the value is used rather
+      // than latched at grab time, so a curator can decide mid-drag.
+      const bypassSeating = event.metaKey || event.ctrlKey;
       const { suppressNextSelect, onCommitPlanMove, onCommitPlanMoveGroup } = getDepsRef.current();
       // Commit a group move once; sub-threshold releases remain clicks.
       if (current.members && current.startGroupCenterMm && current.previewGroupCenterMm) {
@@ -249,7 +312,7 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
         const moves = resolvePlanGroupMove(current.members, deltaMm, reanchorWall).moves.map(
           (move) => move.commit
         );
-        onCommitPlanMoveGroup?.(moves);
+        onCommitPlanMoveGroup?.(moves, bypassSeating);
         return;
       }
 
@@ -263,14 +326,14 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
       // Invalid wall-only drops keep the original placement.
       if (current.previewPlacement.anchor === "none") return;
 
-      onCommitPlanMove?.(current.objectId, current.previewPlacement);
+      onCommitPlanMove?.(current.objectId, current.previewPlacement, bypassSeating);
     }
   });
 
   // The float policy for a moving placed object — kind-only for everything but
   // the two kinds whose current SURFACE decides, which the kind alone cannot
   // say.
-  function floatPolicyForMovingObject(kind: WallObject["kind"], objectId: string): FloatPolicy {
+  function floatPolicyForMovingObject(kind: PlanMovingKind, objectId: string): FloatPolicy {
     const { project } = getDepsRef.current();
     // A case never converts between wall and floor (that machinery is
     // artwork-only; planMoveFloorToWall throws for a case). So a floor case must
@@ -288,6 +351,10 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
     // floor can never resolve to a conversion that planMoveWallToFloor would
     // throw on.
     if (kind === "shelf") return "capture-any";
+    // A support is FLOOR-ONLY for the same reason a floor case is: there is no
+    // wall pedestal to convert into, so a capture could only resolve to a
+    // conversion the store would throw on.
+    if (kind === "support") return "floor-only";
     // Artwork floats BOTH ways, deliberately ignoring the library record's
     // placementForm (USER DECISION, reversing the earlier wall-only rule — see
     // floatPolicyForKind's scope note). Dragging a hung work out into open floor
@@ -338,8 +405,17 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
       selectedObjectIds.includes(params.objectId) && selectedObjectIds.length > 1
         ? selectedObjectIds
         : [params.objectId];
+    // …and every SUPPORT in it contributes the works standing on IT
+    // (floorRiders.ts), the floor twin of the same rule: pressing a pedestal
+    // turns the gesture into a group move over the assembly even with nothing
+    // else selected. Both expansions are idempotent and neither narrows, so
+    // composing them is safe.
     const movingIds = new Set(
-      expandWithShelfRiders(baseIds, project.wallObjects, artworksById)
+      expandWithSupportRiders(
+        expandWithShelfRiders(baseIds, project.wallObjects, artworksById),
+        project.floorObjects,
+        artworksById
+      )
     );
 
     // Which shelf each rider is standing on, derived HERE at drag start and
@@ -437,6 +513,18 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
       }
     }
 
+    // The support this work was standing on when the gesture began, derived
+    // HERE and carried on the drag state — never stored, never re-derived
+    // mid-drag. It is what the overhang clamp measures against: re-asking each
+    // frame would let a work that has been clamped to the edge "discover" a
+    // neighbouring pedestal and hop between two clamps.
+    const startFloorObject = project.floorObjects.find(
+      (object) => object.id === params.objectId
+    );
+    const standsOn = startFloorObject
+      ? resolveFloorStandsOn(startFloorObject, project.floorObjects, artworksById)
+      : null;
+
     startObjectDrag({
       objectId: params.objectId,
       kind: params.kind,
@@ -453,7 +541,9 @@ export function usePlanObjectMove(getDeps: () => PlanObjectMoveDeps) {
       previewPlanRect: params.initialPlanRect,
       previewPlacement: params.currentPlacement,
       previousSnapTargetIds: undefined,
-      activeGuides: []
+      activeGuides: [],
+      startsOnFloor: Boolean(startFloorObject),
+      ridesSupport: standsOn?.kind === "support" ? standsOn.support : null
     });
   }
 

@@ -30,7 +30,12 @@ import {
   MONITOR_PEDESTAL_HEIGHT_MM,
   SHELF_END_MARGIN_MM
 } from "../../domain/project";
-import type { Project, ShelfWallObject } from "../../domain/project";
+import type { Project, ShelfWallObject, SupportFloorObject } from "../../domain/project";
+import {
+  PEDESTAL_FALLBACK_HEIGHT_MM,
+  PEDESTAL_MIN_FOOTPRINT_MM
+} from "../../domain/geometry/supportGlyphs";
+import { DEFAULT_SUSPENSION_HEIGHT_MM } from "./floorObjectSlice";
 import { shelfTopYMm } from "../../domain/geometry/shelfGlyphs";
 import { createShelf } from "../../domain/placement/createShelf";
 import { getShelfRiders } from "../../domain/placement/shelfRiders";
@@ -52,9 +57,8 @@ import {
   getSelectedWall
 } from "../store";
 
-// The shelf-removal notice speaks through sonner (the same channel store.ts's
-// reportSupportRepairs uses), not the error banner; capture it without
-// rendering a Toaster.
+// The shelf-removal notice speaks through sonner, not the error banner;
+// capture it without rendering a Toaster.
 vi.mock("sonner", () => ({
   toast: {
     info: vi.fn(),
@@ -2685,68 +2689,10 @@ describe("placement slice", () => {
         }
       });
 
-      // A pedestal is a sized, curator-authored object: losing it on a stray
-      // drag onto a wall is the same class of loss as losing the plan angle,
-      // and worse, because the restored work silently drops to the floor.
-      it("carries a floor support through a floor → wall → floor capture unchanged", async () => {
-        const objectId = await placeFloorArtwork();
-        await store.getState().setFloorArtworkStandsOn(objectId, "pedestal");
-        await store.getState().updateFloorArtworkSupport(objectId, { offsetXMm: 40 });
-        const before = store.getState().project!.floorObjects.find((o) => o.id === objectId)!;
-        const supportBefore = before.kind === "artwork" ? before.support : undefined;
-        expect(supportBefore).toBeDefined();
-
-        await captureOntoWallEast(objectId);
-        // Parked in the memory slot, not rendered from there (see FloorMemory).
-        const captured = store.getState().project!.wallObjects.find((o) => o.id === objectId)!;
-        expect(captured.kind === "artwork" && captured.floorMemory?.support).toEqual(
-          supportBefore
-        );
-
-        await store
-          .getState()
-          .commitPlanMove(objectId, { anchor: "floor", xMm: 4200, yMm: 4100 });
-
-        const after = store.getState().project!.floorObjects.find((o) => o.id === objectId)!;
-        expect(after.kind === "artwork" && after.support).toEqual(supportBefore);
-      });
-
-      it("re-fits a restored support against a work that was resized on the wall", async () => {
-        await store.getState().addArtworksFromFiles([makeImageFile("bronze.jpg")]);
-        const artworkId = store.getState().project!.checklistArtworkIds[0];
-        await store.getState().updateArtwork(artworkId, {
-          dimensions: { widthMm: 400, heightMm: 600, depthMm: 400, status: "known" }
-        });
-        await store.getState().placeArtworkOnFloor(artworkId, 4000, 4000);
-        const objectId = store.getState().project!.floorObjects[0].id;
-        await store.getState().setFloorArtworkStandsOn(objectId, "pedestal");
-        // 400mm work + 100mm reveal per side.
-        expect(
-          store.getState().project!.floorObjects[0].kind === "artwork" &&
-            (store.getState().project!.floorObjects[0] as { support?: { widthMm: number } })
-              .support?.widthMm
-        ).toBe(600);
-
-        await captureOntoWallEast(objectId);
-        // Unlike baseHeightMm, the WORK's own width is editable while it hangs
-        // on the wall (the dimension rebake follows the placement), so the
-        // parked support can be stale by the time it comes back down.
-        await store.getState().updateArtwork(artworkId, {
-          dimensions: { widthMm: 1200, heightMm: 600, depthMm: 400, status: "known" }
-        });
-
-        await store
-          .getState()
-          .commitPlanMove(objectId, { anchor: "floor", xMm: 4200, yMm: 4100 });
-
-        const after = store.getState().project!.floorObjects.find((o) => o.id === objectId)!;
-        // Grow the support, never shrink the work: a 600mm pedestal cannot hold
-        // a 1200mm work with overhang off.
-        expect(after.widthMm).toBe(1200);
-        expect(after.kind === "artwork" && after.support!.widthMm).toBe(1200);
-      });
-
-      it("leaves a support-less work support-less across the round trip", async () => {
+      // Schema v8: NOTHING about a support is parked on a capture — the
+      // pedestal keeps standing on the floor while the work hangs, exactly as a
+      // shelf does, and the remembered baseHeightMm is what re-seats it.
+      it("parks no support state on a floor → wall → floor capture", async () => {
         const objectId = await placeFloorArtwork();
 
         await captureOntoWallEast(objectId);
@@ -2769,7 +2715,7 @@ describe("placement slice", () => {
       // ─── Box monitors (Artwork.displayAs === "monitor") ────────────────────
       // The floor object of a monitor work is the CABINET, not the work: these
       // pin the two routes onto the floor to the same 4:3 / MONITOR_DEPTH_MM
-      // source, and the absent-means-pedestal rule for the per-placement support.
+      // source.
 
       async function addMonitorArtwork() {
         await store.getState().addArtworksFromFiles([makeImageFile("video.jpg")]);
@@ -2782,12 +2728,24 @@ describe("placement slice", () => {
         const artworkId = await addMonitorArtwork();
         await store.getState().placeArtworkOnFloor(artworkId, 4000, 4000);
 
-        const placed = store.getState().project!.floorObjects[0]!;
+        // The cabinet is the LAST floor object: its pedestal is a separate
+        // support object inserted immediately before it (schema v8), so it
+        // draws beneath the box standing on it.
+        const floorObjects = store.getState().project!.floorObjects;
+        const placed = floorObjects.at(-1)!;
+        expect(placed.kind).toBe("artwork");
         expect(placed.depthMm).toBe(MONITOR_DEPTH_MM);
         expect(placed.widthMm / placed.heightMm).toBeCloseTo(MONITOR_ASPECT_RATIO, 6);
-        // The pedestal is deliberately NOT in heightMm — it is added by the
-        // renderers from monitorSupport, so toggling it rewrites no geometry.
+        // The pedestal is deliberately NOT in heightMm — it is a separate
+        // support floor object, so it rewrites no geometry here; it stands the
+        // cabinet up by writing its baseHeightMm instead.
         expect(placed.heightMm).toBeLessThan(MONITOR_PEDESTAL_HEIGHT_MM);
+        expect(placed.baseHeightMm).toBe(MONITOR_PEDESTAL_HEIGHT_MM);
+        expect(floorObjects.at(-2)).toMatchObject({
+          kind: "support",
+          supportKind: "pedestal",
+          heightMm: MONITOR_PEDESTAL_HEIGHT_MM
+        });
       });
 
       it("re-seeds an already-placed work's box when it becomes a monitor", async () => {
@@ -2816,32 +2774,6 @@ describe("placement slice", () => {
         const placed = store.getState().project!.floorObjects.find((o) => o.id === placementId)!;
         expect(placed.depthMm).toBe(MONITOR_DEPTH_MM);
         expect(placed.widthMm / placed.heightMm).toBeCloseTo(MONITOR_ASPECT_RATIO, 6);
-      });
-
-      it("leaves monitorSupport ABSENT until the curator overrides the pedestal default", async () => {
-        const artworkId = await addMonitorArtwork();
-        await store.getState().placeArtworkOnFloor(artworkId, 4000, 4000);
-        const objectId = store.getState().project!.floorObjects[0]!.id;
-
-        const placed = store.getState().project!.floorObjects[0]!;
-        expect("monitorSupport" in placed).toBe(false);
-
-        // Re-choosing the resolved default is a no-op: absence stays absence, so
-        // a clean project's hash never dirties and no dead undo entry is pushed.
-        await store.getState().setFloorArtworkMonitorSupport(objectId, "pedestal");
-        expect(
-          "monitorSupport" in store.getState().project!.floorObjects.find((o) => o.id === objectId)!
-        ).toBe(false);
-
-        await store.getState().setFloorArtworkMonitorSupport(objectId, "floor");
-        const onFloor = store.getState().project!.floorObjects.find((o) => o.id === objectId)!;
-        expect(onFloor.kind === "artwork" && onFloor.monitorSupport).toBe("floor");
-
-        // ...and back to an EXPLICIT pedestal, which now differs from the stored
-        // value and therefore does get written.
-        await store.getState().setFloorArtworkMonitorSupport(objectId, "pedestal");
-        const back = store.getState().project!.floorObjects.find((o) => o.id === objectId)!;
-        expect(back.kind === "artwork" && back.monitorSupport).toBe("pedestal");
       });
 
       it("still inherits the source wall's angle on a first-ever wall → floor conversion", async () => {
@@ -3625,6 +3557,424 @@ describe("placement slice", () => {
           expect(state.undoStack).toHaveLength(undoBefore);
           expect(objectById(shelfId).wallId).toBe("wall-north");
           expect(objectById(workId).wallId).toBe("wall-north");
+        });
+      });
+    });
+    // ─── Floor supports: seating, carry, delete and the insert tool ─────────
+    //
+    // The seating rule (floor-supports spec §4) lives in the COMMIT paths, not
+    // in a view, so plan and 3D share it: these pin it where both of them land.
+    describe("floor supports", () => {
+      const floorObjects = () => store.getState().project!.floorObjects;
+      const byId = (id: string) => floorObjects().find((object) => object.id === id)!;
+      const supports = () =>
+        floorObjects().filter((object) => object.kind === "support") as SupportFloorObject[];
+
+      async function placeFloorWork(
+        xMm: number,
+        yMm: number,
+        {
+          widthMm = 300,
+          heightMm = 300,
+          depthMm = 300,
+          displayAs
+        }: {
+          widthMm?: number;
+          heightMm?: number;
+          depthMm?: number;
+          displayAs?: "monitor";
+        } = {}
+      ) {
+        await store.getState().addArtworksFromFiles([makeImageFile(`work-${xMm}-${yMm}.jpg`)]);
+        const artworkId = store.getState().project!.checklistArtworkIds.at(-1)!;
+        await store.getState().updateArtwork(artworkId, {
+          dimensions: { widthMm, heightMm, depthMm, status: "known" },
+          ...(displayAs ? { displayAs } : {})
+        });
+        await store.getState().placeArtworkOnFloor(artworkId, xMm, yMm);
+        return { artworkId, objectId: floorObjects().at(-1)!.id };
+      }
+
+      // A 600×600 pedestal at (1000, 1000) with a 1000mm top face, injected
+      // through the store's own action so the test never hand-writes a
+      // document (createSupport's id is the store's to mint).
+      async function addPedestalAt(xMm: number, yMm: number) {
+        await store.getState().placeOpeningFromPlan("support", {
+          anchor: "floor",
+          xMm,
+          yMm
+        });
+        const support = supports().at(-1)!;
+        await store
+          .getState()
+          .updateFloorObject(support.id, { widthMm: 600, depthMm: 600, heightMm: 1000 });
+        return support.id;
+      }
+
+      describe("the insert tool", () => {
+        it("places a pedestal at the click and selects it", async () => {
+          await store.getState().placeOpeningFromPlan("support", {
+            anchor: "floor",
+            xMm: 2500,
+            yMm: 3500
+          });
+
+          const state = store.getState();
+          expect(state.undoStack.at(-1)?.label).toBe("Add pedestal");
+          const support = supports()[0];
+          expect(support).toMatchObject({
+            supportKind: "pedestal",
+            xMm: 2500,
+            yMm: 3500,
+            rotationDeg: 0,
+            widthMm: PEDESTAL_MIN_FOOTPRINT_MM,
+            depthMm: PEDESTAL_MIN_FOOTPRINT_MM,
+            heightMm: PEDESTAL_FALLBACK_HEIGHT_MM
+          });
+          expect(state.selection).toEqual({ kind: "objects", ids: [support.id] });
+        });
+
+        it("refuses a wall click and says where a pedestal goes", async () => {
+          const wallId = getSelectedWall(
+            store.getState().project!,
+            store.getState().wallContextId
+          )!.id;
+
+          await store
+            .getState()
+            .placeOpeningFromPlan("support", { anchor: "wall", wallId, xMm: 1200 });
+
+          expect(store.getState().error).toBe(
+            "A pedestal stands on the floor. Click the floor in plan to place it."
+          );
+          expect(supports()).toHaveLength(0);
+        });
+
+        it("refuses an elevation placement the same way", async () => {
+          const wallId = getSelectedWall(
+            store.getState().project!,
+            store.getState().wallContextId
+          )!.id;
+
+          await store.getState().placeOpeningOnElevation("support", wallId, 1200, 900);
+
+          expect(store.getState().error).toBe(
+            "A pedestal stands on the floor. Click the floor in plan to place it."
+          );
+          expect(supports()).toHaveLength(0);
+        });
+
+        it("refuses the wall inspector's add-to-wall path too", async () => {
+          const wallId = getSelectedWall(
+            store.getState().project!,
+            store.getState().wallContextId
+          )!.id;
+
+          await store.getState().addOpening(wallId, "support");
+
+          expect(store.getState().error).toBe(
+            "A pedestal stands on the floor. Click the floor in plan to place it."
+          );
+          expect(supports()).toHaveLength(0);
+        });
+      });
+
+      describe("commitPlanMove seating", () => {
+        it("stands a work dragged onto a pedestal on it", async () => {
+          const supportId = await addPedestalAt(1000, 1000);
+          const { objectId } = await placeFloorWork(5000, 5000);
+
+          await store
+            .getState()
+            .commitPlanMove(objectId, { anchor: "floor", xMm: 1000, yMm: 1000 });
+
+          expect(byId(objectId).baseHeightMm).toBe(1000);
+          expect(byId(supportId).kind).toBe("support");
+        });
+
+        it("sets a work dragged OFF its pedestal back on the floor", async () => {
+          await addPedestalAt(1000, 1000);
+          const { objectId } = await placeFloorWork(1000, 1000);
+          await store
+            .getState()
+            .commitPlanMove(objectId, { anchor: "floor", xMm: 1000, yMm: 1001 });
+          expect(byId(objectId).baseHeightMm).toBe(1000);
+
+          await store
+            .getState()
+            .commitPlanMove(objectId, { anchor: "floor", xMm: 6000, yMm: 6000 });
+
+          // DELETED, not zeroed: absence is "resting on the floor".
+          expect("baseHeightMm" in byId(objectId)).toBe(false);
+        });
+
+        it("leaves an explicitly SUSPENDED work's height alone", async () => {
+          const { objectId } = await placeFloorWork(5000, 5000);
+          await store.getState().suspendFloorArtwork(objectId);
+
+          await store
+            .getState()
+            .commitPlanMove(objectId, { anchor: "floor", xMm: 6000, yMm: 6000 });
+
+          expect(byId(objectId).baseHeightMm).toBe(DEFAULT_SUSPENSION_HEIGHT_MM);
+        });
+
+        it("⌘/Ctrl bypasses seating entirely", async () => {
+          await addPedestalAt(1000, 1000);
+          const { objectId } = await placeFloorWork(5000, 5000);
+
+          await store
+            .getState()
+            .commitPlanMove(objectId, { anchor: "floor", xMm: 1000, yMm: 1000 }, false, true);
+
+          expect("baseHeightMm" in byId(objectId)).toBe(false);
+        });
+
+        it("a dragged pedestal carries its works even when the caller sent only the box", async () => {
+          const supportId = await addPedestalAt(1000, 1000);
+          const { objectId } = await placeFloorWork(1000, 1000);
+          await store
+            .getState()
+            .commitPlanMove(objectId, { anchor: "floor", xMm: 1000, yMm: 1001 });
+
+          await store
+            .getState()
+            .commitPlanMove(supportId, { anchor: "floor", xMm: 4000, yMm: 2000 });
+
+          expect(byId(objectId)).toMatchObject({ xMm: 4000, yMm: 2001 });
+          expect(byId(objectId).baseHeightMm).toBe(1000);
+        });
+      });
+
+      describe("movePlanObjectsGroup seating", () => {
+        it("seats a work the batch moved onto a pedestal", async () => {
+          await addPedestalAt(1000, 1000);
+          const { objectId } = await placeFloorWork(5000, 5000);
+
+          await store
+            .getState()
+            .movePlanObjectsGroup([{ id: objectId, xMm: 1000, yMm: 1000 }]);
+
+          expect(byId(objectId).baseHeightMm).toBe(1000);
+        });
+
+        it("does NOT re-seat riders carried with their own pedestal", async () => {
+          const supportId = await addPedestalAt(1000, 1000);
+          const { objectId } = await placeFloorWork(1000, 1000);
+          await store
+            .getState()
+            .commitPlanMove(objectId, { anchor: "floor", xMm: 1000, yMm: 1001 });
+          // A second, TALLER pedestal parked where the assembly is going: if the
+          // rider were re-evaluated after the move it would jump onto that one.
+          const tallId = await addPedestalAt(4000, 2000);
+          await store.getState().updateFloorObject(tallId, { heightMm: 1300 });
+
+          await store.getState().movePlanObjectsGroup([
+            { id: supportId, xMm: 4000, yMm: 2000 },
+            { id: objectId, xMm: 4000, yMm: 2001 }
+          ]);
+
+          expect(byId(objectId).baseHeightMm).toBe(1000);
+        });
+
+        it("⌘/Ctrl bypasses group seating too", async () => {
+          await addPedestalAt(1000, 1000);
+          const { objectId } = await placeFloorWork(5000, 5000);
+
+          await store
+            .getState()
+            .movePlanObjectsGroup([{ id: objectId, xMm: 1000, yMm: 1000 }], false, true);
+
+          expect("baseHeightMm" in byId(objectId)).toBe(false);
+        });
+      });
+
+      describe("a box monitor gets a pedestal on every route onto the floor", () => {
+        async function addMonitorArtwork() {
+          await store.getState().addArtworksFromFiles([makeImageFile("crt.jpg")]);
+          const artworkId = store.getState().project!.checklistArtworkIds.at(-1)!;
+          await store.getState().updateArtwork(artworkId, {
+            displayAs: "monitor",
+            dimensions: { widthMm: 500, heightMm: 400, status: "known" }
+          });
+          return artworkId;
+        }
+
+        it("the checklist drop", async () => {
+          const artworkId = await addMonitorArtwork();
+
+          await store.getState().placeArtworkOnFloor(artworkId, 4000, 4000);
+
+          const [support, cabinet] = floorObjects();
+          expect(support).toMatchObject({
+            kind: "support",
+            supportKind: "pedestal",
+            heightMm: MONITOR_PEDESTAL_HEIGHT_MM,
+            xMm: 4000,
+            yMm: 4000
+          });
+          expect(cabinet.baseHeightMm).toBe(MONITOR_PEDESTAL_HEIGHT_MM);
+          // Selection lands on the WORK, never on the pedestal that came with it.
+          expect(store.getState().selection).toEqual({
+            kind: "objects",
+            ids: [cabinet.id]
+          });
+        });
+
+        it("the wall→floor Type toggle", async () => {
+          const artworkId = await addMonitorArtwork();
+          const wallId = getSelectedWall(
+            store.getState().project!,
+            store.getState().wallContextId
+          )!.id;
+          await store.getState().placeArtwork(artworkId, wallId, 1200, 1450);
+
+          await store.getState().setArtworkPlacementForm(artworkId, "floor");
+
+          const cabinet = floorObjects().at(-1)!;
+          expect(cabinet.baseHeightMm).toBe(MONITOR_PEDESTAL_HEIGHT_MM);
+          expect(supports()).toHaveLength(1);
+          expect(supports()[0].heightMm).toBe(MONITOR_PEDESTAL_HEIGHT_MM);
+        });
+
+        it("a floor-memory restore onto the pedestal it left reuses it", async () => {
+          const artworkId = await addMonitorArtwork();
+          await store.getState().placeArtworkOnFloor(artworkId, 4000, 4000);
+          const objectId = floorObjects().at(-1)!.id;
+          const wallId = getSelectedWall(
+            store.getState().project!,
+            store.getState().wallContextId
+          )!.id;
+          // Onto the wall — the pedestal keeps standing, exactly as a shelf
+          // does when a work is taken off it.
+          await store
+            .getState()
+            .commitPlanMove(objectId, { anchor: "wall", wallId, xMm: 1200 });
+          expect(supports()).toHaveLength(1);
+
+          // …and back down onto it. The restore must NOT mint a second one.
+          await store
+            .getState()
+            .commitPlanMove(objectId, { anchor: "floor", xMm: 4000, yMm: 4000 });
+
+          expect(supports()).toHaveLength(1);
+          expect(floorObjects().find((object) => object.id === objectId)!.baseHeightMm).toBe(
+            MONITOR_PEDESTAL_HEIGHT_MM
+          );
+        });
+
+        it("a restore that lands clear of every pedestal brings a fresh one", async () => {
+          const artworkId = await addMonitorArtwork();
+          const wallId = getSelectedWall(
+            store.getState().project!,
+            store.getState().wallContextId
+          )!.id;
+          await store.getState().placeArtwork(artworkId, wallId, 1200, 1450);
+
+          await store
+            .getState()
+            .commitPlanMove(store.getState().project!.wallObjects[0].id, {
+              anchor: "floor",
+              xMm: 6000,
+              yMm: 6000
+            });
+
+          expect(supports()).toHaveLength(1);
+          expect(floorObjects().at(-1)!.baseHeightMm).toBe(MONITOR_PEDESTAL_HEIGHT_MM);
+        });
+
+        it("a drop that lands on an EXISTING pedestal stands on that one", async () => {
+          const supportId = await addPedestalAt(1000, 1000);
+          const artworkId = await addMonitorArtwork();
+
+          await store.getState().placeArtworkOnFloor(artworkId, 1000, 1000);
+
+          expect(supports()).toHaveLength(1);
+          expect(supports()[0].id).toBe(supportId);
+          expect(floorObjects().at(-1)!.baseHeightMm).toBe(1000);
+        });
+
+        it("⌘/Ctrl at the drop skips the pedestal altogether", async () => {
+          const artworkId = await addMonitorArtwork();
+
+          await store
+            .getState()
+            .placeArtworkOnFloor(artworkId, 4000, 4000, { bypassSeating: true });
+
+          expect(supports()).toHaveLength(0);
+          expect("baseHeightMm" in floorObjects().at(-1)!).toBe(false);
+        });
+      });
+
+      describe("deleting a pedestal", () => {
+        it("sets its works on the floor and says so, with no dialog", async () => {
+          const supportId = await addPedestalAt(1000, 1000);
+          const { objectId: aId } = await placeFloorWork(900, 1000, { widthMm: 200 });
+          const { objectId: bId } = await placeFloorWork(1100, 1000, { widthMm: 200 });
+          for (const id of [aId, bId]) {
+            await store
+              .getState()
+              .commitPlanMove(id, { anchor: "floor", xMm: byId(id).xMm, yMm: 1001 });
+          }
+          expect(byId(aId).baseHeightMm).toBe(1000);
+
+          await store.getState().removePlacement(supportId);
+
+          expect("baseHeightMm" in byId(aId)).toBe(false);
+          expect("baseHeightMm" in byId(bId)).toBe(false);
+          expect(toast.info).toHaveBeenCalledWith(
+            "Pedestal removed; 2 works set on the floor."
+          );
+        });
+
+        it("names a plinth a plinth, counts one work as one, and rides the keyboard Delete path too", async () => {
+          const supportId = await addPedestalAt(1000, 1000);
+          await store.getState().setSupportKind(supportId, "plinth");
+          const { objectId } = await placeFloorWork(1000, 1000);
+          await store
+            .getState()
+            .commitPlanMove(objectId, { anchor: "floor", xMm: 1000, yMm: 1001 });
+
+          // removeSelectedPlacements is the keyboard Delete path: it deletes
+          // the SELECTION, so the plinth has to be selected first.
+          store.getState().selectObject(supportId);
+          await store.getState().removeSelectedPlacements();
+
+          expect("baseHeightMm" in byId(objectId)).toBe(false);
+          expect(toast.info).toHaveBeenCalledWith(
+            "Plinth removed; 1 work set on the floor."
+          );
+        });
+
+        it("says nothing when nothing was standing on it", async () => {
+          const supportId = await addPedestalAt(1000, 1000);
+
+          await store.getState().removePlacement(supportId);
+
+          expect(toast.info).not.toHaveBeenCalled();
+        });
+      });
+
+      describe("overlap policy", () => {
+        // A rider and its support overlap BY DEFINITION, and so does a work
+        // standing beside another on one plinth. Floor objects are unvalidated
+        // in v1 (no wall bounds — see placeArtworkOnFloor), so there is no gate
+        // to relax: this pins that a whole seated assembly commits with no
+        // blocking warning and no refused edit, which is the behaviour the
+        // policy promises.
+        it("a pedestal, its rider and a second pedestal all coexist", async () => {
+          await addPedestalAt(1000, 1000);
+          const { objectId } = await placeFloorWork(1000, 1000);
+          await store
+            .getState()
+            .commitPlanMove(objectId, { anchor: "floor", xMm: 1000, yMm: 1001 });
+          await addPedestalAt(1000, 1000);
+
+          const state = store.getState();
+          expect(state.error).toBeNull();
+          expect(state.placementWarnings ?? []).toHaveLength(0);
+          expect(byId(objectId).baseHeightMm).toBe(1000);
+          expect(supports()).toHaveLength(2);
         });
       });
     });

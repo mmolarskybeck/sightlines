@@ -24,7 +24,8 @@ import type {
   Asset,
   CaseFloorObject,
   Project,
-  SavedView
+  SavedView,
+  SupportFloorObject
 } from "../../domain/project";
 import {
   buildElevationScene,
@@ -74,7 +75,7 @@ import {
   drawElevationFloorCaseGhost,
   drawElevationMonitorGhost,
   drawElevationSuspendedArtworkGhost,
-  drawElevationSupportedArtworkGhost,
+  drawElevationSupportGhost,
   drawElevationPartitionProfile,
   drawArtworkPlaceholder
 } from "./pdf/elevationPage";
@@ -424,6 +425,12 @@ export async function createDocumentPdf(
           object.kind === "artwork" &&
           isPointInPolygon({ xMm: object.xMm, yMm: object.yMm }, roomPolygonMm)
       );
+      // Pedestals and plinths, same room filter: they ghost on their own now.
+      const elevationFloorSupports = input.project.floorObjects.filter(
+        (object): object is SupportFloorObject =>
+          object.kind === "support" &&
+          isPointInPolygon({ xMm: object.xMm, yMm: object.yMm }, roomPolygonMm)
+      );
       // Partitions in this room project onto the wall face as well. Room-OWNED,
       // so they gate on roomId rather than point-in-polygon; and when this page
       // IS a partition face, its own partition is dropped so it can't project
@@ -441,6 +448,7 @@ export async function createDocumentPdf(
           input.project.defaultCenterlineHeightMm,
         artworksById,
         floorCases: elevationFloorCases,
+        floorSupports: elevationFloorSupports,
         floorArtworks: elevationFloorArtworks,
         partitions: elevationPartitions,
         wallStartFloorMm: {
@@ -487,13 +495,14 @@ export async function createDocumentPdf(
       for (const ghost of scene.suspendedArtworkGhosts) {
         drawElevationSuspendedArtworkGhost(page, transform, ghost, scene.wallHeightMm);
       }
-      // Works standing on a pedestal or plinth, same slot: support block +
-      // work + optional bonnet, rising from the floor line.
-      for (const ghost of scene.supportedArtworkGhosts) {
-        drawElevationSupportedArtworkGhost(page, transform, ghost);
+      // Pedestals and plinths, same slot: the block + optional bonnet, rising
+      // from the floor line. The works ON them draw as suspended/monitor ghosts
+      // above, at their own base heights.
+      for (const ghost of scene.supportGhosts) {
+        drawElevationSupportGhost(page, transform, ghost);
       }
-      // Box monitors standing in front of the wall, same slot: pedestal +
-      // cabinet + screen, rising from the floor line.
+      // Box monitors standing in front of the wall, same slot: cabinet +
+      // screen, at the cabinet's own base height.
       for (const ghost of scene.monitorGhosts) {
         drawElevationMonitorGhost(page, transform, ghost);
       }

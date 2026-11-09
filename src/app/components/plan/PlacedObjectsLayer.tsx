@@ -11,9 +11,11 @@ import {
   type Artwork,
   type Dimensions,
   type Project,
-  type WallObject
 } from "../../../domain/project";
-import type { PlanPlacement } from "../../../domain/snapping/planSnapTargets";
+import type {
+  PlanMovingKind,
+  PlanPlacement
+} from "../../../domain/snapping/planSnapTargets";
 import type { PlanRect } from "../../../domain/geometry/planObjects";
 import type { Vector2 } from "../../../domain/geometry/dragResize";
 import { PlanObject } from "./PlanObject";
@@ -42,7 +44,7 @@ import type { ObjectDragState } from "./types";
 // is preserved exactly.
 type BeginObjectDragParams = {
   objectId: string;
-  kind: WallObject["kind"];
+  kind: PlanMovingKind;
   startCenterMm: Vector2;
   movingSize: { widthMm: number; heightMm: number; depthMm: number };
   wallFootprintWidthMm?: number;
@@ -51,35 +53,6 @@ type BeginObjectDragParams = {
   currentPlacement: PlanPlacement;
   initialPlanRect: PlanRect;
 };
-
-// Where a support rect goes once a preview has moved or turned the work it
-// carries. The scene's rect is the REST position, so a live drag or rotate would
-// otherwise leave the pedestal behind while the sculpture slides off it: the
-// pair shares ONE placement (ArtworkFloorObject.support) and has to travel as
-// one body. The support is therefore re-placed by the same rigid transform the
-// preview applied to the work — the translation, plus the angle change taken
-// about the work's own center — and never re-derived from the support's numbers.
-//
-// Exactly the identity when nothing is previewing: planRect === restRect gives
-// cos 1 / sin 0, so the scene's rect comes back bit for bit.
-function previewSupportRect(
-  supportRect: PlanRect,
-  restRect: PlanRect,
-  planRect: PlanRect
-): PlanRect {
-  const deltaRad = ((planRect.angleDeg - restRect.angleDeg) * Math.PI) / 180;
-  const cos = Math.cos(deltaRad);
-  const sin = Math.sin(deltaRad);
-  const dxMm = supportRect.centerXMm - restRect.centerXMm;
-  const dyMm = supportRect.centerYMm - restRect.centerYMm;
-  return {
-    centerXMm: planRect.centerXMm + dxMm * cos - dyMm * sin,
-    centerYMm: planRect.centerYMm + dxMm * sin + dyMm * cos,
-    widthMm: supportRect.widthMm,
-    depthMm: supportRect.depthMm,
-    angleDeg: planRect.angleDeg
-  };
-}
 
 export type PlacedObjectsLayerProps = {
   openingConnections: PlanSceneOpeningConnection[];
@@ -367,7 +340,7 @@ export function PlacedObjectsLayer({
           object: floorObject,
           artwork: floorArtwork,
           rect: restRect,
-          support
+          hasBonnet
         }: PlanSceneFloorObject) => {
         const groupPreviewRect = objectDrag?.members
           ? objectDrag.previewRectById?.get(floorObject.id)
@@ -410,24 +383,27 @@ export function PlacedObjectsLayer({
             // display type of its own (see Artwork.displayAs).
             isMonitor={isMonitorArtwork(floorArtwork)}
             isSelected={isSelected}
+            // A pedestal/plinth lights up while a drop or a drag is captured
+            // over it — the plan half of "a surface announces itself", the same
+            // affordance a shelf gets on the wall side.
+            isSnapTarget={floorObject.id === snapTargetObjectId}
             key={floorObject.id}
             kind={floorObject.kind}
             pixelsPerMm={pixelsPerMm}
             planRect={planRect}
-            // The pedestal/plinth under this work, carried along by whatever
-            // preview moved the work itself (see previewSupportRect).
-            support={
-              support
-                ? {
-                    rect: previewSupportRect(support.rect, restRect, planRect),
-                    hasBonnet: support.hasBonnet
-                  }
-                : undefined
-            }
+            hasBonnet={hasBonnet ?? false}
             tooltip={
               floorObject.kind === "artwork" ? (
                 artworkTooltip(floorObject.artworkId, floorObject.displayDimensionsOverride)
               ) : floorObject.kind === "case" ? (
+                <CaseTooltipContent
+                  secondaryMm={floorObject.depthMm}
+                  unit={unit}
+                  widthMm={floorObject.widthMm}
+                />
+              ) : floorObject.kind === "support" ? (
+                // A pedestal/plinth reads width × depth like the case above —
+                // its footprint is what a plan can say about it.
                 <CaseTooltipContent
                   secondaryMm={floorObject.depthMm}
                   unit={unit}

@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 8;
 export const CURRENT_ARTWORK_SCHEMA_VERSION = 1;
 export const CURRENT_ASSET_SCHEMA_VERSION = 1;
 
@@ -81,9 +81,9 @@ export type Artwork = {
   // It travels with the WORK, not with a placement: a video on a CRT is a video
   // on a CRT whether or not it is in a room yet, which is also why the
   // inspector's Display dropdown is visible for an unplaced work. The
-  // per-PLACEMENT half of the decision — pedestal or bare floor — lives on
-  // ArtworkFloorObject.monitorSupport, because that is a fact about this
-  // installation of it, not about the work.
+  // per-PLACEMENT half of the decision — pedestal or bare floor — is a support
+  // floor object standing under the cabinet (or the absence of one), because
+  // that is a fact about this installation of it, not about the work.
   displayAs?: ArtworkDisplayAs;
   // Optional, additive framing (no schema-version bump): a mat band width and
   // a frame spec. Both absent on legacy records, which then load and render
@@ -358,18 +358,12 @@ export type ArtworkFloorMemory = FloorMemory & {
   // only one that is a stated curatorial choice rather than a measurement — a
   // "top only" floor graphic silently becoming a front+back board.
   imageFaces?: FloorObjectFace[];
-  // The floor support (pedestal/plinth/bonnet) the work was standing on at the
-  // moment of capture, and the monitor's absent-means-pedestal choice, parked
-  // with the same absent-vs-present discipline as imageFaces above: a pedestal
-  // is a real, sized, curator-authored object, and losing it on a mis-drag onto
-  // a wall and back is the same class of loss as losing the plan angle — worse,
-  // because a restored work would silently drop to the floor.
-  //
-  // Dormant here (nothing renders from it, see FloorMemory's TRAP); the restore
-  // path re-runs normalizeFloorSupport against the work's CURRENT dimensions,
-  // since the work may have been resized while it hung on the wall.
-  support?: FloorSupport;
-  monitorSupport?: MonitorSupport;
+  // NOTHING about a pedestal is parked here (schema v8, floor-supports spec
+  // §2). A support is its own floor object now: capturing the work onto a wall
+  // leaves the pedestal standing on the floor, exactly as a shelf keeps
+  // standing when the work on it is taken off, and the restore re-seats the
+  // work from `baseHeightMm` alone. The v7 `support`/`monitorSupport` keys are
+  // stripped by MIGRATIONS[7].
 };
 
 export type ArtworkWallObject = WallObjectBase & {
@@ -634,78 +628,47 @@ export type ArtworkFloorObject = FloorObjectBase & {
   // object's floorMemory (see ArtworkFloorMemory) — a capture must not be able
   // to rewrite a curatorial choice into the default.
   imageFaces?: FloorObjectFace[];
-  // What a BOX-MONITOR work (Artwork.displayAs === "monitor") stands on in
-  // THIS installation: a plain white pedestal, or the bare floor. Meaningless —
-  // and ignored by every renderer — for any other work.
-  //
-  // ABSENT MEANS PEDESTAL, deliberately, and the default is resolved at READ
-  // time (resolveMonitorSupport in geometry/monitorGlyphs.ts) exactly as
-  // `imageFaces` absent means front+back: baking "pedestal" in at write time
-  // would lose the "never chosen" reading, and a later change to the default
-  // could then never reach the placements that never expressed an opinion.
-  // Unlike imageFaces there is no third state — the union has two members, so
-  // "floor" is always an explicit choice.
-  //
-  // Lives on the PLACEMENT, not the Artwork, because it is a fact about how the
-  // work is installed here (this room has plinths, that one doesn't), the same
-  // split the projection board draws between imageFaces and the work itself.
-  monitorSupport?: MonitorSupport;
-  // The block this work STANDS ON: a pedestal or a plinth, optionally under a
-  // plexi bonnet. Absent = the work sits on the floor (or hangs, if
-  // baseHeightMm > 0) — support and suspension are mutually exclusive states,
-  // and with a support present the work's bottom edge is the support's TOP face
-  // and baseHeightMm is ignored, exactly as cases and monitors ignore it.
-  //
-  // ATTACHED to the placement rather than modelled as its own floor object
-  // (USER DECISION 2026-09-17): the pair shares this object's xMm/yMm/
-  // rotationDeg, so a plan drag moves the assembly and nothing has to keep two
-  // objects married. See geometry/supportGlyphs.ts — resolveFloorSupport is the
-  // only correct way to read this (a box monitor with no explicit support still
-  // resolves to its 800mm pedestal), and normalizeFloorSupport owns every
-  // relational invariant between the support box and the work standing on it.
-  support?: FloorSupport;
+  // NOTHING here says what this work stands on. A work STANDS ON a support
+  // when its plan footprint overlaps the support's and its `baseHeightMm`
+  // equals that support's `heightMm` within SUPPORT_SEAT_TOLERANCE_MM — the
+  // relationship is DERIVED at every read, never stored (floor-supports spec
+  // §2/§3, the same USER DECISION shelf riders follow). See
+  // placement/floorRiders.ts, which owns the entire definition.
   displayDimensionsOverride?: Dimensions;
 };
 
-// A pedestal or a plinth: physically the same attached block, distinguished by
-// proportion and by the defaults each one seeds (supportGlyphs.ts). Kept as a
-// stored kind rather than inferred from the box's dimensions because "this is a
-// plinth" is a curatorial statement that survives resizing it.
+// A pedestal or a plinth: physically the same box, distinguished by proportion
+// and by the defaults each one seeds (supportGlyphs.ts). Kept as a stored kind
+// rather than inferred from the box's dimensions because "this is a plinth" is
+// a curatorial statement that survives resizing it.
 export type FloorSupportKind = "pedestal" | "plinth";
 
-// See ArtworkFloorObject.support. Sizes here are the SUPPORT BOX's; the
-// placement's own widthMm/depthMm/heightMm still size the WORK standing on it.
-export type FloorSupport = {
-  kind: FloorSupportKind;
-  widthMm: number;
-  depthMm: number;
-  heightMm: number;
-  // The SUPPORT's center relative to the WORK's center, in the placement's
-  // rotated local frame. Absent = 0 (and a value that clamps to 0 is written
-  // absent). The inspector shows the negation, "work position on support", and
-  // negates at that one boundary — nothing else may.
-  offsetXMm?: number;
-  offsetYMm?: number;
-  // Absent/false: the work's footprint must stay inside the support's top face.
-  // True: the work may hang over an edge, subject only to the two footprints
-  // still overlapping. Absent and explicit false are both preserved verbatim —
-  // never normalised into one another.
-  overhangAllowed?: boolean;
+// A pedestal or plinth standing on the floor, modelled on the wall shelf: its
+// OWN floor object, not a block attached to one artwork (schema v8,
+// floor-supports spec §2 — USER DECISION 2026-09-18, superseding the
+// 2026-09-17 attached-support model). One pedestal can therefore carry several
+// works, and "what does this work stand on" is derived from geometry rather
+// than stored on either side (placement/floorRiders.ts).
+//
+// `heightMm` is the TOP FACE height above the floor: the number a rider's
+// `baseHeightMm` matches. `baseHeightMm` is ignored on a support (a support
+// never hangs) and `wallYMm` is written as 0 — there is no support↔wall
+// conversion, exactly as there is none for a case.
+export type SupportFloorObject = FloorObjectBase & {
+  kind: "support";
+  supportKind: FloorSupportKind;
   // Plexi bonnet height, rising from the support's TOP face; its footprint IS
-  // the support's (USER DECISION 2026-09-17). Absent = no bonnet, which is also
-  // the only state in which bonnetHeightLocked may exist.
+  // the support's (USER DECISION 2026-09-17, carried forward). Absent = no
+  // bonnet, which is also the only state in which bonnetHeightLocked may exist.
   bonnetHeightMm?: number;
-  // Absent/false: the bonnet height TRACKS the work (re-derived on every
-  // normalise, so a stale imported number never survives). True: the number is
-  // the curator's and is never auto-changed — a locked bonnet shorter than the
-  // work warns rather than grows (USER DECISION 2026-09-17).
+  // Absent/false: the bonnet height TRACKS the tallest rider. True: the number
+  // is the curator's and is never auto-changed.
   bonnetHeightLocked?: boolean;
+  // Absent/false: a rider's footprint must stay inside the top face. True: a
+  // rider may hang over an edge, subject only to the two footprints still
+  // overlapping. Absent and explicit false are both preserved verbatim.
+  overhangAllowed?: boolean;
 };
-
-// What a box-monitor placement stands on. See
-// ArtworkFloorObject.monitorSupport — absent is a third, distinct value there
-// ("never chosen"), resolving to "pedestal".
-export type MonitorSupport = "pedestal" | "floor";
 
 export type BlockedZoneFloorObject = FloorObjectBase & {
   kind: "blocked-zone";
@@ -725,7 +688,11 @@ export type CaseFloorObject = FloorObjectBase & {
 
 // Doors/windows are excluded from floor placement by the type system —
 // they only ever exist as WallObjects.
-export type FloorObject = ArtworkFloorObject | BlockedZoneFloorObject | CaseFloorObject;
+export type FloorObject =
+  | ArtworkFloorObject
+  | BlockedZoneFloorObject
+  | CaseFloorObject
+  | SupportFloorObject;
 
 // Floor-case curatorial defaults: see caseGlyphs.ts.
 export {

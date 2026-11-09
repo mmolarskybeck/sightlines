@@ -21,6 +21,7 @@ import type {
   DisplayUnit,
   FloorObject,
   ReferenceMeasurement,
+  SupportFloorObject,
   WallObject,
   WallObjectBase
 } from "../../../domain/project";
@@ -65,7 +66,7 @@ import { ElevationCase, ElevationFloorCaseGhost } from "./ElevationCase";
 import { ElevationPartitionProfile } from "./ElevationPartitionProfile";
 import { ElevationShelf } from "./ElevationShelf";
 import { ElevationSuspendedArtworkGhost } from "./ElevationSuspendedArtworkGhost";
-import { ElevationSupportedArtworkGhost } from "./ElevationSupportedArtworkGhost";
+import { ElevationSupportGhost } from "./ElevationSupportGhost";
 import { ElevationMonitorGhost } from "./ElevationMonitorGhost";
 import { ElevationWallText } from "./ElevationWallText";
 import {
@@ -435,6 +436,9 @@ export function ElevationView({
     const floorArtworks = floorObjects.filter(
       (object): object is ArtworkFloorObject => object.kind === "artwork" && inThisRoom(object)
     );
+    const floorSupports = floorObjects.filter(
+      (object): object is SupportFloorObject => object.kind === "support" && inThisRoom(object)
+    );
     // Partitions gate on room ownership + own-face exclusion, not on the
     // point-in-polygon test the floor objects need — see
     // selectElevationPartitions, which the two PDF paths share.
@@ -444,11 +448,17 @@ export function ElevationView({
           wallId
         })
       : [];
-    if (floorCases.length === 0 && floorArtworks.length === 0 && partitions.length === 0) {
+    if (
+      floorCases.length === 0 &&
+      floorArtworks.length === 0 &&
+      floorSupports.length === 0 &&
+      partitions.length === 0
+    ) {
       return null;
     }
     return {
       floorCases,
+      floorSupports,
       floorArtworks,
       partitions,
       wallStartFloorMm: floorWall.startFloorMm,
@@ -479,10 +489,8 @@ export function ElevationView({
   const visibleSuspendedArtworkGhosts = ghostsVisible
     ? elevationScene.suspendedArtworkGhosts
     : [];
-  // Works standing on a pedestal/plinth ride the same one gate.
-  const visibleSupportedArtworkGhosts = ghostsVisible
-    ? elevationScene.supportedArtworkGhosts
-    : [];
+  // Pedestals and plinths ride the same one gate.
+  const visibleSupportGhosts = ghostsVisible ? elevationScene.supportGhosts : [];
   // Box monitors ride the same one gate as the other ghost families.
   const visibleMonitorGhosts = ghostsVisible ? elevationScene.monitorGhosts : [];
   // Abutting slabs are architecture, not projection: they stay in every state.
@@ -818,7 +826,7 @@ export function ElevationView({
     visibleFloorCaseGhosts,
     visibleSuspendedArtworkGhosts,
     visibleMonitorGhosts,
-    visibleSupportedArtworkGhosts,
+    visibleSupportGhosts,
     partitionNeighborShims,
     wallId,
     wallLengthMm,
@@ -967,36 +975,27 @@ export function ElevationView({
             xMinMm={ghost.xMinMm}
           />
         ))}
-        {/* Works standing on a pedestal or plinth: same slot, inert and dashed,
-            standing on the floor line. Two spans — the support's own for the
-            support block and the bonnet, the work's own for the work outline
-            above it (see the component). */}
-        {visibleSupportedArtworkGhosts.map((ghost) => (
-          <ElevationSupportedArtworkGhost
+        {/* Pedestals and plinths: same slot, inert and dashed, standing on the
+            floor line. The works ON them are drawn by the suspended/monitor
+            ghosts above, at their own baseHeightMm. */}
+        {visibleSupportGhosts.map((ghost) => (
+          <ElevationSupportGhost
             key={ghost.objectId}
             bonnetHeightMm={ghost.bonnetHeightMm}
-            supportHeightMm={ghost.supportHeightMm}
-            supportXMaxMm={ghost.supportXMaxMm}
-            supportXMinMm={ghost.supportXMinMm}
+            heightMm={ghost.heightMm}
             wallHeightMm={wallHeightMm}
-            workHeightMm={ghost.workHeightMm}
-            workXMaxMm={ghost.workXMaxMm}
-            workXMinMm={ghost.workXMinMm}
             xMaxMm={ghost.xMaxMm}
             xMinMm={ghost.xMinMm}
           />
         ))}
         {/* Box monitors standing in front of this wall: the same behind-the-
-            wall-objects paint slot, inert and dashed, but standing on the floor
-            line (pedestal + cabinet) rather than floating. */}
+            wall-objects paint slot, inert and dashed, standing at their own
+            base height (0 on the bare floor, a pedestal's top face on one). */}
         {visibleMonitorGhosts.map((ghost) => (
           <ElevationMonitorGhost
             key={ghost.object.id}
-            bonnetHeightMm={ghost.bonnetHeightMm}
+            baseHeightMm={ghost.baseHeightMm}
             monitorHeightMm={ghost.monitorHeightMm}
-            pedestalHeightMm={ghost.pedestalHeightMm}
-            supportXMaxMm={ghost.supportXMaxMm}
-            supportXMinMm={ghost.supportXMinMm}
             wallHeightMm={wallHeightMm}
             xMaxMm={ghost.xMaxMm}
             xMinMm={ghost.xMinMm}
@@ -1348,7 +1347,12 @@ export function ElevationView({
               size={openingToolGhost.sizeMm}
               wallHeightMm={wallHeightMm}
             />
-          ) : (
+          ) : activeTool === "support" ? // Unreachable: the pedestal tool is
+          // filtered out of the elevation Insert cluster and
+          // useElevationOpeningTool refuses to resolve a ghost for it, so there
+          // is never a ghost to draw. The arm exists because the union says the
+          // kind is possible.
+          null : (
             <ElevationOpening
               center={openingToolGhost.centerMm}
               isGhost

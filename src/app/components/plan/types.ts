@@ -1,11 +1,15 @@
 import type { Vector2 } from "../../../domain/geometry/dragResize";
 import type { ResizeAnchor } from "../../../domain/geometry/editRoom";
 import type { FloorWall, PlanRect } from "../../../domain/geometry/planObjects";
-import type { FloatPolicy, ResolvedPlacement } from "../../../domain/snapping/planSnapTargets";
+import type {
+  FloatPolicy,
+  PlanMovingKind,
+  ResolvedPlacement
+} from "../../../domain/snapping/planSnapTargets";
 import type { Guide, SnapTargetIds } from "../../../domain/snapping/resolveSnap";
 import type { PlanGroupMember } from "../../../domain/snapping/planGroupMove";
 import type { DrawRoomSnap } from "../../../domain/geometry/drawSnapping";
-import type { WallObject } from "../../../domain/project";
+import type { SupportFloorObject } from "../../../domain/project";
 
 // The transient, never-persisted gesture states that back PlanView's live
 // drag/draw previews. They live here (rather than inline in PlanView) so the
@@ -77,7 +81,7 @@ export type ToolGhostState = {
 // omits them from deps, so the drag never resubscribes mid-gesture.
 export type ObjectDragState = {
   objectId: string;
-  kind: WallObject["kind"];
+  kind: PlanMovingKind;
   // Per-kind fall-through behavior when no wall captures (floatPolicyForKind):
   // artwork, case and blocked-zone float onto the floor, door/window
   // capture-any, a floor case is floor-only.
@@ -129,6 +133,23 @@ export type ObjectDragState = {
   // the sticky target for break-free hysteresis, and read on release so the
   // commit re-anchors onto exactly the wall the preview last showed.
   previewReanchorWall?: FloorWall | null;
+  // THE snap-target support id for this drag: the pedestal/plinth a release
+  // right now would stand this floor work on (seatOnAnyOverlappingSupport at
+  // the live preview centre), so its plan glyph can light up in the selection
+  // colour — the plan half of "a surface announces itself", same as the shelf's
+  // dropGhost.shelfId. Null while nothing is under the work, while ⌘/Ctrl is
+  // held (the seating bypass), and for every gesture that is not a single floor
+  // artwork: a support's own drag carries its riders instead of capturing them.
+  seatSupportId?: string | null;
+  // Was the pressed object a FLOOR object at grab time? Seating is a floor-only
+  // question, and the kind alone cannot answer it (an "artwork" may be hanging).
+  startsOnFloor?: boolean;
+  // The support this work was standing on when the gesture began, derived once
+  // at grab time and never re-derived mid-drag. The overhang clamp measures
+  // against THIS box: re-asking each frame would let a work clamped to one
+  // pedestal's edge "discover" a neighbouring one and hop between two clamps.
+  // Null when the work was not a rider.
+  ridesSupport?: SupportFloorObject | null;
 };
 
 // A rotate drag of ONE selected floor object (FloorObjectRotateHandle): the
@@ -169,6 +190,10 @@ export type DropGhostState = {
   // glyph can light up while the work is captured over it — the same "a
   // surface announces itself" feedback the elevation guide gives.
   shelfId?: string;
+  // The floor twin: the pedestal/plinth this FLOOR drop would stand the work
+  // on (seatOnAnyOverlappingSupport). Absent when the drop would rest on the
+  // floor. Mutually exclusive with shelfId — a drop resolves to one anchor.
+  supportId?: string;
 };
 
 // The in-progress polygon-room draw gesture, transient until close/cancel and

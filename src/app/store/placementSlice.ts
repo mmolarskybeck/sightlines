@@ -11,13 +11,18 @@ import {
   withArtworkFootprintFromMap
 } from "../../domain/framing";
 import { clamp } from "../../domain/geometry/scalar";
-import { normalizeFloorSupport } from "../../domain/geometry/supportGlyphs";
 import { isHangableWall } from "../../domain/geometry/wallCascade";
 import { newId } from "../../domain/id";
 import { effectiveFloorDepthMm, type PlacementForm } from "../../domain/placement/artworkForm";
 import { createFloorCase, createWallCase } from "../../domain/placement/createCase";
 import { createShelf } from "../../domain/placement/createShelf";
+import { monitorPedestalForPlacement } from "../../domain/placement/createSupport";
 import { getShelfRiders } from "../../domain/placement/shelfRiders";
+import {
+  getSupportRiders,
+  resolveFloorStandsOn,
+  seatOnAnyOverlappingSupport
+} from "../../domain/placement/floorRiders";
 import {
   clearOpeningPartners,
   includePairedOpenings,
@@ -40,6 +45,7 @@ import {
   type Project,
   type ShelfWallObject,
   SHELF_END_MARGIN_MM,
+  type SupportFloorObject,
   type WallObject
 } from "../../domain/project";
 import { shelfCenterYMmForTop, shelfTopYMm } from "../../domain/geometry/shelfGlyphs";
@@ -112,7 +118,20 @@ export type PlacementSliceActions = OpeningPlacementSliceActions & {
     allowOverlap?: boolean
   ) => Promise<void>;
   removePlacement: (wallObjectId: string) => Promise<void>;
-  placeArtworkOnFloor: (artworkId: string, xMm: number, yMm: number) => Promise<void>;
+  // `opts.bypassSeating` is the ⌘/Ctrl precision bypass, carried from the drop
+  // gesture: held, a work dropped over a pedestal hangs free instead of
+  // standing on it, exactly as it already skips the grid and the neighbour
+  // snap. Absent/false, a floor drop that lands on a support STANDS ON IT —
+  // always, not opt-in (floor-supports spec §4), which is why there is no
+  // `seatOnSupportId` twin of the shelf's opt-in seam: plan has no vertical
+  // axis to get wrong, so the store can resolve the seat itself once the real
+  // size is baked.
+  placeArtworkOnFloor: (
+    artworkId: string,
+    xMm: number,
+    yMm: number,
+    opts?: { bypassSeating?: boolean }
+  ) => Promise<void>;
   // The artwork inspector's Wall|Floor "Type" control. For a PLACED work this
   // converts the placement itself — off the wall onto the floor in front of it,
   // or off the floor onto the nearest wall — reusing the same round-tripping
@@ -168,10 +187,17 @@ export type PlacementSliceActions = OpeningPlacementSliceActions & {
     wallObjectId: string,
     changes: Partial<Pick<ShelfWallObject, "xMm" | "yMm" | "widthMm" | "heightMm" | "depthMm">>
   ) => Promise<void>;
+  // `bypassSeating` is the ⌘/Ctrl precision bypass. Without it, a floor artwork
+  // that lands over a support stands on it and one that was a rider and now
+  // overlaps nothing is set back on the floor (floor-supports spec §4); a work
+  // that was deliberately SUSPENDED over nothing keeps its height. Plan and 3D
+  // both pass the modifier straight through, so the rule is the surfaces'
+  // shared one rather than each surface's own.
   commitPlanMove: (
     objectId: string,
     placement: PlanPlacement,
-    allowOverlap?: boolean
+    allowOverlap?: boolean,
+    bypassSeating?: boolean
   ) => Promise<void>;
   // A group of wall objects moved in BOTH wall axes in one undo entry. `wallId`
   // re-anchors a member onto another wall (the 3D shelf-assembly drag's hop);
@@ -180,9 +206,15 @@ export type PlacementSliceActions = OpeningPlacementSliceActions & {
     moves: { id: string; xMm: number; yMm: number; wallId?: string }[],
     allowOverlap?: boolean
   ) => Promise<void>;
+  // The group twin of commitPlanMove's seating rule, with one exception that
+  // makes an assembly an assembly: a support moved together with its riders
+  // CARRIES them, so those riders are not re-evaluated — they travelled, they
+  // did not land somewhere new. Riders of a moved support that are not in the
+  // batch are carried too (the 3D drag commits the support alone).
   movePlanObjectsGroup: (
     moves: { id: string; xMm: number; yMm?: number; wallId?: string }[],
-    allowOverlap?: boolean
+    allowOverlap?: boolean,
+    bypassSeating?: boolean
   ) => Promise<void>;
   removeSelectedPlacements: () => Promise<void>;
 };
@@ -351,8 +383,8 @@ export function createPlacementSlice(
   // everywhere else; a rider being deleted in the same breath is not "left in
   // place" and is excluded.
   //
-  // It speaks through the same sonner channel store.ts's reportSupportRepairs
-  // uses, NOT `error`: the error banner is for something that went wrong and
+  // It speaks through sonner, NOT `error`: the error banner is for something
+  // that went wrong and
   // sticks until the next edit clears it, while this is a calm statement of
   // what a deliberate delete just did. toast.info, because nothing here needs
   // fixing.
@@ -379,6 +411,125 @@ export function createPlacementSlice(
         "work"
       )} left in place.`
     );
+  }
+
+  // --- floor support seating ------------------------------------------------
+
+  // The one seating decision every floor move shares (floor-supports spec §4).
+  // `object` is the work as it was BEFORE the move (that is what "was it a
+  // rider" has to be asked of); `centerMm` is where it is landing; `among` is
+  // the floor-object list to look for supports in — the POST-move list when the
+  // batch also moved a pedestal, so the work is judged against where that
+  // pedestal actually ended up.
+  //
+  // Returns the baseHeightMm to write, `null` to DELETE the key, or undefined
+  // to leave it alone. Three outcomes, not two, because "resting on the floor"
+  // is absence in this codebase and a work that was deliberately suspended over
+  // nothing must keep its height rather than being dropped by a sideways nudge.
+  function resolveFloorSeat(
+    object: FloorObject,
+    centerMm: { xMm: number; yMm: number },
+    among: readonly FloorObject[],
+    rotationDeg = object.rotationDeg
+  ): number | null | undefined {
+    const seat = seatOnAnyOverlappingSupport(
+      {
+        id: object.id,
+        centerMm,
+        widthMm: object.widthMm,
+        depthMm: object.depthMm,
+        rotationDeg
+      },
+      among
+    );
+    if (seat) return seat.baseHeightMm;
+    const wasRider =
+      resolveFloorStandsOn(object, among, artworksById()).kind === "support";
+    return wasRider ? null : undefined;
+  }
+
+  // Apply resolveFloorSeat's three-way answer to a floor object.
+  function withFloorSeat(object: FloorObject, seat: number | null | undefined): FloorObject {
+    if (seat === undefined) return object;
+    if (seat === null) {
+      const next = { ...object };
+      delete next.baseHeightMm;
+      return next;
+    }
+    return { ...object, baseHeightMm: seat };
+  }
+
+  // Deleting a pedestal sets the works that were standing on it on the floor —
+  // nothing is lost, so there is no confirm dialog, but a work left hovering at
+  // a height with nothing under it would be a lie about the room.
+  function clearRidersOfRemovedSupports(
+    project: Project,
+    removedIds: ReadonlySet<string>
+  ): FloorObject[] {
+    const riderIds = removedSupportRiderIds(project, removedIds);
+    if (riderIds.size === 0) return project.floorObjects;
+    return project.floorObjects.map((object) => {
+      if (!riderIds.has(object.id)) return object;
+      const next = { ...object };
+      delete next.baseHeightMm;
+      return next;
+    });
+  }
+
+  // The SURVIVING works that were standing on a support in `removedIds`.
+  // Derived from the PRE-edit project like every other rider question; a rider
+  // being deleted in the same breath is not "set on the floor" and drops out.
+  function removedSupportRiderIds(
+    project: Project,
+    removedIds: ReadonlySet<string>
+  ): Set<string> {
+    const riderIds = new Set<string>();
+    const artworks = artworksById();
+    for (const support of removedSupports(project, removedIds)) {
+      for (const rider of getSupportRiders(support, project.floorObjects, artworks)) {
+        if (removedIds.has(rider.id)) continue;
+        riderIds.add(rider.id);
+      }
+    }
+    return riderIds;
+  }
+
+  function removedSupports(
+    project: Project,
+    removedIds: ReadonlySet<string>
+  ): SupportFloorObject[] {
+    return project.floorObjects.filter(
+      (object): object is SupportFloorObject =>
+        object.kind === "support" && removedIds.has(object.id)
+    );
+  }
+
+  // The same sonner channel the shelf notice uses, and for the same reason:
+  // this is a calm statement of what a deliberate delete just did, not
+  // something that went wrong and has to stick until the next edit.
+  function noticeRemovedSupportRiders(
+    project: Project,
+    removedIds: ReadonlySet<string>
+  ): void {
+    const supports = removedSupports(project, removedIds);
+    if (supports.length === 0) return;
+    const riderIds = removedSupportRiderIds(project, removedIds);
+    if (riderIds.size === 0) return;
+
+    const kinds = new Set(supports.map((support) => support.supportKind));
+    const plinths = kinds.size === 1 && kinds.has("plinth");
+    const noun =
+      kinds.size > 1
+        ? "Supports"
+        : supports.length === 1
+          ? plinths
+            ? "Plinth"
+            : "Pedestal"
+          : plinths
+            ? "Plinths"
+            : "Pedestals";
+
+    toast.info(`${noun} removed; ${pluralize(riderIds.size, "work")} set on the floor.`);
   }
 
   // --- commitPlanMove case handlers ----------------------------------------
@@ -566,6 +717,9 @@ export function createPlacementSlice(
     };
 
     let newFloorObject: FloorObject;
+    // Declared outside the branch: the monitor-pedestal rule below has to know
+    // whether this is a cabinet, and the branch is where that is decided.
+    let monitorSizeMm: { widthMm: number; heightMm: number; depthMm: number } | undefined;
     if (wallObject.kind === "artwork") {
       // A monitor work coming down onto the floor re-seeds the CABINET's
       // geometry rather than inheriting the flat wall plane's width/height
@@ -576,37 +730,18 @@ export function createPlacementSlice(
       const monitorArtwork = get().libraryArtworks.find(
         (candidate) => candidate.id === wallObject.artworkId
       );
-      const monitorSizeMm = isMonitorArtwork(monitorArtwork)
+      monitorSizeMm = isMonitorArtwork(monitorArtwork)
         ? monitorBoxSizeMm(monitorArtwork?.dimensions)
         : undefined;
 
-      // The floor support and the monitor's pedestal choice, coming back out of
-      // the memory slot they were parked in at capture. Same absent-vs-present
-      // rule as imageFaces above: a work that never stood on anything must not
-      // acquire a support key here.
-      //
-      // The support is re-normalised against the dimensions the work is
-      // landing with, NOT restored verbatim: unlike baseHeightMm (which nothing
-      // on a wall can edit, so its memory cannot go stale), the work's own
-      // width/height ARE editable up there — and a monitor's cabinet is
-      // re-seeded on the way down — so a pedestal captured around a 400mm work
-      // would otherwise come back holding a 900mm one over its edges. The
-      // normaliser is idempotent, so an unchanged work restores its support
-      // unchanged.
-      const restoredMonitorSupport = wallObject.floorMemory?.monitorSupport;
-      const rememberedSupport = wallObject.floorMemory?.support;
+      // NOTHING about a support is restored (schema v8): a pedestal stayed on
+      // the floor while the work hung on the wall, and the work's remembered
+      // baseHeightMm — carried by floorMemory exactly as before — is what puts
+      // it back on top of one. Re-seating is geometric: if the restored
+      // footprint overlaps a support at that height it is simply a rider again
+      // (floor-supports spec §4, "Wall capture / restore").
       const restoredDepthMm =
         monitorSizeMm?.depthMm ?? floorDepthForWallArtwork(wallObject);
-      const restoredSupport = rememberedSupport
-        ? normalizeFloorSupport(
-            {
-              widthMm: monitorSizeMm?.widthMm ?? base.widthMm,
-              depthMm: restoredDepthMm,
-              heightMm: monitorSizeMm?.heightMm ?? base.heightMm
-            },
-            rememberedSupport
-          ).support
-        : undefined;
 
       newFloorObject = {
         ...base,
@@ -625,10 +760,6 @@ export function createPlacementSlice(
         ...(wallObject.floorMemory?.imageFaces !== undefined
           ? { imageFaces: [...wallObject.floorMemory.imageFaces] }
           : {}),
-        ...(restoredMonitorSupport !== undefined
-          ? { monitorSupport: restoredMonitorSupport }
-          : {}),
-        ...(restoredSupport !== undefined ? { support: restoredSupport } : {}),
         depthMm: restoredDepthMm,
         ...(wallObject.displayDimensionsOverride
           ? { displayDimensionsOverride: wallObject.displayDimensionsOverride }
@@ -642,6 +773,39 @@ export function createPlacementSlice(
       };
     }
 
+    // A BOX MONITOR coming down onto the floor gets its pedestal back (spec
+    // §5): the support stayed on the floor while the work hung on the wall, so
+    // an existing one under the landing point takes it — and only when there is
+    // none does a fresh one appear. This is the same rule the checklist drop
+    // applies, stated once per path because the restored baseHeightMm above is
+    // memory and this is geometry: a work restored to 800mm with nothing under
+    // it would draw as a cabinet floating in the air.
+    let restoredPedestal: SupportFloorObject | null = null;
+    if (newFloorObject.kind === "artwork" && monitorSizeMm) {
+      const seat = seatOnAnyOverlappingSupport(
+        {
+          id: newFloorObject.id,
+          centerMm: { xMm: newFloorObject.xMm, yMm: newFloorObject.yMm },
+          widthMm: newFloorObject.widthMm,
+          depthMm: newFloorObject.depthMm,
+          rotationDeg: newFloorObject.rotationDeg
+        },
+        project.floorObjects
+      );
+      if (seat) {
+        newFloorObject = { ...newFloorObject, baseHeightMm: seat.baseHeightMm };
+      } else {
+        restoredPedestal = monitorPedestalForPlacement({
+          xMm: newFloorObject.xMm,
+          yMm: newFloorObject.yMm,
+          widthMm: newFloorObject.widthMm,
+          depthMm: newFloorObject.depthMm,
+          rotationDeg: newFloorObject.rotationDeg
+        });
+        newFloorObject = { ...newFloorObject, baseHeightMm: restoredPedestal.heightMm };
+      }
+    }
+
     // Selection survives for free: the id is preserved, and the
     // selection slots store the id (openings) / artworkId (artworks),
     // neither of which changes here.
@@ -650,7 +814,11 @@ export function createPlacementSlice(
       (current) => ({
         ...current,
         wallObjects: current.wallObjects.filter((object) => object.id !== wallObject.id),
-        floorObjects: [...current.floorObjects, newFloorObject]
+        floorObjects: [
+          ...current.floorObjects,
+          ...(restoredPedestal ? [restoredPedestal] : []),
+          newFloorObject
+        ]
       })
     );
   }
@@ -660,17 +828,41 @@ export function createPlacementSlice(
   async function planMoveFloorToFloor(
     project: Project,
     floorObject: FloorObject,
-    placement: Extract<PlanPlacement, { anchor: "floor" }>
+    placement: Extract<PlanPlacement, { anchor: "floor" }>,
+    bypassSeating = false
   ): Promise<void> {
     if (floorObject.xMm === placement.xMm && floorObject.yMm === placement.yMm) {
       return;
     }
 
-    const nextFloorObjects = project.floorObjects.map((object) =>
-      object.id === floorObject.id
-        ? { ...object, xMm: placement.xMm, yMm: placement.yMm }
-        : object
-    );
+    // A dropped WORK seats (or unseats) on whatever pedestal it landed over.
+    const seat =
+      floorObject.kind === "artwork" && !bypassSeating
+        ? resolveFloorSeat(floorObject, placement, project.floorObjects)
+        : undefined;
+
+    // A dragged SUPPORT carries its works, even when the caller sent only the
+    // pedestal: plan expands the moving set before it gets here, but 3D's
+    // object drag commits one object, and a pedestal that slid out from under
+    // its works would be a lie about the room. Riders are read from the
+    // PRE-move project, as everywhere else.
+    const deltaMm = { xMm: placement.xMm - floorObject.xMm, yMm: placement.yMm - floorObject.yMm };
+    const carriedIds =
+      floorObject.kind === "support"
+        ? new Set(
+            getSupportRiders(floorObject, project.floorObjects, artworksById()).map(
+              (rider) => rider.id
+            )
+          )
+        : new Set<string>();
+
+    const nextFloorObjects = project.floorObjects.map((object) => {
+      if (object.id === floorObject.id) {
+        return withFloorSeat({ ...object, xMm: placement.xMm, yMm: placement.yMm }, seat);
+      }
+      if (!carriedIds.has(object.id)) return object;
+      return { ...object, xMm: object.xMm + deltaMm.xMm, yMm: object.yMm + deltaMm.yMm };
+    });
 
     await applyEdit(`Move ${moveObjectNoun(floorObject.kind)}`, (current) => ({
       ...current,
@@ -729,19 +921,11 @@ export function createPlacementSlice(
         ...floorMemory,
         ...(floorObject.imageFaces !== undefined
           ? { imageFaces: [...floorObject.imageFaces] }
-          : {}),
-        // The pedestal/plinth the work was standing on, and the monitor's own
-        // absent-means-pedestal choice, parked under the same discipline: a
-        // support is a sized, curator-authored object, and a mis-drag onto a
-        // wall must not be the thing that deletes it. Copied rather than
-        // aliased for the same reason imageFaces is — the memory must not share
-        // an object with the live placement an undo snapshot still holds.
-        ...(floorObject.support !== undefined
-          ? { support: { ...floorObject.support } }
-          : {}),
-        ...(floorObject.monitorSupport !== undefined
-          ? { monitorSupport: floorObject.monitorSupport }
           : {})
+        // No support state is parked here (schema v8): the pedestal is its own
+        // floor object and simply keeps standing while the work is on the wall,
+        // exactly as a shelf does. `floorMemory.baseHeightMm` (above) is what
+        // brings the work back down onto it.
       };
       newWallObject = {
         ...base,
@@ -1007,16 +1191,21 @@ export function createPlacementSlice(
           project.wallObjects.filter((wallObject) => !removedIds.has(wallObject.id)),
           removedIds
         ),
-        floorObjects: project.floorObjects.filter((floorObject) => !removedIds.has(floorObject.id))
+        // A removed PEDESTAL sets its works on the floor in the same commit, so
+        // one undo puts the box and the heights back together.
+        floorObjects: clearRidersOfRemovedSupports(project, removedIds).filter(
+          (floorObject) => !removedIds.has(floorObject.id)
+        )
       };
 
       await applyEdit("Remove from wall", () => nextProject);
       // AFTER the commit: persist() clears `error` on its way in, so a notice
       // set before this line would be wiped by the very edit it describes.
       noticeRemovedShelfRiders(project, removedIds);
+      noticeRemovedSupportRiders(project, removedIds);
     },
 
-    async placeArtworkOnFloor(artworkId, xMm, yMm) {
+    async placeArtworkOnFloor(artworkId, xMm, yMm, opts) {
       const project = get().project;
       if (!project) return;
 
@@ -1035,8 +1224,8 @@ export function createPlacementSlice(
       // scaled off whatever the work records, MONITOR_DEPTH_MM deep. It
       // deliberately does NOT take the flat-artwork path — the image's own
       // aspect and depth describe the video, not the equipment playing it.
-      // (The pedestal is not part of this height; it is added by the
-      // renderers from monitorSupport — see CrtMonitorMesh.)
+      // (A pedestal is not part of this height: it is a separate support floor
+      // object — see createSupport.ts's monitorPedestalForPlacement.)
       const isMonitor = isMonitorArtwork(artwork);
       const aspect = isMonitor ? undefined : await loadArtworkAspect(artwork);
       const { widthMm, heightMm, depthMm } = isMonitor
@@ -1062,6 +1251,32 @@ export function createPlacementSlice(
         wallYMm: project.defaultCenterlineHeightMm
       };
 
+      // The drop's seat, resolved AFTER the real size is baked (the ghost the
+      // curator aimed with may have been placeholder-sized). Two outcomes, in
+      // this order: a pedestal already under the drop point takes the work, and
+      // otherwise a BOX MONITOR brings its own — the 2026-08-28 default stand,
+      // now an object rather than an absent field (floor-supports spec §5).
+      const seat = opts?.bypassSeating
+        ? null
+        : seatOnAnyOverlappingSupport(
+            { centerMm: { xMm, yMm }, widthMm, depthMm, rotationDeg: 0 },
+            project.floorObjects
+          );
+      const pedestal =
+        seat || !isMonitor || opts?.bypassSeating
+          ? null
+          : monitorPedestalForPlacement({ xMm, yMm, widthMm, depthMm, rotationDeg: 0 });
+      const baseHeightMm = seat?.baseHeightMm ?? pedestal?.heightMm;
+      const placed: ArtworkFloorObject =
+        baseHeightMm === undefined ? floorObject : { ...floorObject, baseHeightMm };
+      // The pedestal goes in BEFORE the work: plan and 3D draw floor objects in
+      // stored order, so the box has to precede what stands on it.
+      const nextFloorObjects = [
+        ...project.floorObjects,
+        ...(pedestal ? [pedestal] : []),
+        placed
+      ];
+
       // Floor objects get no bounds/collision validation in v1 (no wall
       // bounds; 2-D footprint collision is a v2 candidate) — an empty
       // validate-ids list keeps the shared gate a no-op here.
@@ -1072,11 +1287,12 @@ export function createPlacementSlice(
         [],
         true,
         {
-          nextFloorObjects: [...project.floorObjects, floorObject],
-          // Replace selection with the new floor placement.
+          nextFloorObjects,
+          // Replace selection with the new floor placement — the WORK, never
+          // the pedestal that came with it.
           extras: selectionWrite(
-            { ...project, floorObjects: [...project.floorObjects, floorObject] },
-            { kind: "objects", ids: [floorObject.id] },
+            { ...project, floorObjects: nextFloorObjects },
+            { kind: "objects", ids: [placed.id] },
             get().wallContextId
           )
         }
@@ -1382,7 +1598,7 @@ export function createPlacementSlice(
       );
     },
 
-    async commitPlanMove(objectId, placement, allowOverlap = false) {
+    async commitPlanMove(objectId, placement, allowOverlap = false, bypassSeating = false) {
       const project = get().project;
       if (!project) return;
 
@@ -1407,7 +1623,7 @@ export function createPlacementSlice(
       if (!floorObject) return; // unreachable — narrows the type below.
 
       if (placement.anchor === "floor") {
-        await planMoveFloorToFloor(project, floorObject, placement);
+        await planMoveFloorToFloor(project, floorObject, placement, bypassSeating);
         return;
       }
 
@@ -1426,7 +1642,7 @@ export function createPlacementSlice(
       if (result.status === "committed") await persist(result.project);
     },
 
-    async movePlanObjectsGroup(moves, allowOverlap = false) {
+    async movePlanObjectsGroup(moves, allowOverlap = false, bypassSeating = false) {
       const project = get().project;
       if (!project) return;
 
@@ -1468,14 +1684,65 @@ export function createPlacementSlice(
       });
 
       const movedFloorIds: string[] = [];
+      // Riders CARRIED by a support in this batch. Two populations, one rule:
+      // a rider the caller already listed (plan expands the moving set before
+      // it commits) travelled rigidly and must not be re-seated, and a rider the
+      // caller did NOT list (the 3D drag commits the pedestal alone) is
+      // translated here by its support's delta so it travels anyway. Either way
+      // a carried work keeps its baseHeightMm: it moved WITH the top face, it
+      // did not land on a new one.
+      const carriedDeltaById = new Map<string, { xMm: number; yMm: number }>();
+      for (const floorObject of project.floorObjects) {
+        if (floorObject.kind !== "support") continue;
+        const move = floorMoveById.get(floorObject.id);
+        if (!move) continue;
+        const deltaMm = {
+          xMm: move.xMm - floorObject.xMm,
+          yMm: (move.yMm ?? floorObject.yMm) - floorObject.yMm
+        };
+        for (const rider of getSupportRiders(floorObject, project.floorObjects, artworksById())) {
+          if (carriedDeltaById.has(rider.id)) continue;
+          carriedDeltaById.set(rider.id, floorMoveById.has(rider.id) ? { xMm: 0, yMm: 0 } : deltaMm);
+        }
+      }
+
       const nextFloorObjects = project.floorObjects.map((floorObject) => {
         const move = floorMoveById.get(floorObject.id);
-        if (!move) return floorObject;
+        const carriedDelta = carriedDeltaById.get(floorObject.id);
+        if (!move) {
+          if (!carriedDelta || (carriedDelta.xMm === 0 && carriedDelta.yMm === 0)) {
+            return floorObject;
+          }
+          return {
+            ...floorObject,
+            xMm: floorObject.xMm + carriedDelta.xMm,
+            yMm: floorObject.yMm + carriedDelta.yMm
+          };
+        }
         const yMm = move.yMm ?? floorObject.yMm;
         if (floorObject.xMm === move.xMm && floorObject.yMm === yMm) return floorObject;
         movedFloorIds.push(floorObject.id);
         return { ...floorObject, xMm: move.xMm, yMm };
       });
+
+      // Seating runs against the COMPLETED draft, so a work dragged together
+      // with the pedestal it is about to stand on is judged against where that
+      // pedestal ended up, not where it started.
+      const seatedFloorObjects = bypassSeating
+        ? nextFloorObjects
+        : nextFloorObjects.map((floorObject) => {
+            if (floorObject.kind !== "artwork") return floorObject;
+            if (!floorMoveById.has(floorObject.id)) return floorObject;
+            if (carriedDeltaById.has(floorObject.id)) return floorObject;
+            const before = project.floorObjects.find(
+              (object) => object.id === floorObject.id
+            );
+            if (!before) return floorObject;
+            return withFloorSeat(
+              floorObject,
+              resolveFloorSeat(before, floorObject, nextFloorObjects)
+            );
+          });
 
       if (movedWallIds.length === 0 && movedFloorIds.length === 0) return;
 
@@ -1524,7 +1791,7 @@ export function createPlacementSlice(
         [...movedWallIds, ...paired.validateIds],
         allowOverlap,
         {
-          nextFloorObjects,
+          nextFloorObjects: seatedFloorObjects,
           ...(movedOpeningWallIds.length > 0
             ? { reconcileWallIds: movedOpeningWallIds }
             : {})
@@ -1557,7 +1824,7 @@ export function createPlacementSlice(
           project.wallObjects.filter((wallObject) => !removedIds.has(wallObject.id)),
           removedIds
         ),
-        floorObjects: project.floorObjects.filter(
+        floorObjects: clearRidersOfRemovedSupports(project, removedIds).filter(
           (floorObject) => !removedIds.has(floorObject.id)
         )
       };
@@ -1567,9 +1834,11 @@ export function createPlacementSlice(
         () => nextProject,
         selectionWrite(project, NO_SELECTION, get().wallContextId)
       );
-      // Same notice as removePlacement — this is the keyboard Delete path, and
-      // a shelf removed here leaves its works behind exactly the same way.
+      // Same notices as removePlacement — this is the keyboard Delete path, and
+      // a shelf removed here leaves its works behind exactly the same way, a
+      // pedestal sets them on the floor exactly the same way.
       noticeRemovedShelfRiders(project, removedIds);
+      noticeRemovedSupportRiders(project, removedIds);
     },
   };
 

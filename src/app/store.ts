@@ -755,13 +755,11 @@ export function createAppStore(deps: AppStoreDeps) {
     // below leave the repair in memory on the "idle" badge rather than claiming
     // "Saved" over a document storage does not hold.
     //
-    // `stored` is the document as the repository read it BEFORE the support
-    // repair (ProjectLoadReport.stored): the same reference as `project` unless
-    // the load normaliser re-fitted a support. It is what the snapshot copies,
-    // and its differing from `project` is the second reason to write back —
-    // the repository has already applied that repair, so setDocument sees
-    // nothing left to do and would otherwise leave the malformed record in
-    // storage to be repaired and announced again on every open.
+    // `stored` is the document as the repository read it (ProjectLoadReport
+    // .stored). It is what the snapshot copies, and its differing from
+    // `project` is the second reason to write back — a repository that already
+    // applied a repair leaves setDocument nothing to do, and the malformed
+    // record would otherwise sit in storage to be repaired again on every open.
     async function openLoadedDocument(
       project: Project,
       extras: Partial<AppState> = {},
@@ -989,28 +987,6 @@ export function createAppStore(deps: AppStoreDeps) {
       return repair.project;
     }
 
-    // Floor supports the LOAD NORMALISER had to re-fit on the way in
-    // (migrateProjectWithReport's supportRepairCount): a pedestal narrower than
-    // the work standing on it, an offset that had detached it, a stale bonnet
-    // height. Said in its own words and counted on its own, never folded into
-    // either shared-opening number above — those two are about openings, and
-    // reusing their copy for a pedestal would describe the wrong repair.
-    //
-    // Every path that HAS a report says so: a snapshot restore, a JSON import,
-    // and the ordinary opens (boot and openProject), which ask the project
-    // repository for loadWithReport rather than dropping the count. Paths that
-    // only pass a document through (a passive cross-tab refresh, a rename of a
-    // project that isn't open) stay silent — they still normalise, exactly as a
-    // shared-opening repair is applied there, they just have no one to tell.
-    function reportSupportRepairs(supportRepairCount: number): void {
-      if (supportRepairCount <= 0) return;
-      toast.warning(
-        supportRepairCount === 1
-          ? "One pedestal was re-fitted to the work standing on it while opening this project."
-          : `${supportRepairCount} pedestals were re-fitted to the works standing on them while opening this project.`
-      );
-    }
-
     // The scope a geometry edit reconciles within: the walls it touched, PLUS
     // the walls those face. Both sides are required — an edit scoped to only
     // the moved room's walls cannot see the boundary it is meant to reconcile,
@@ -1196,7 +1172,6 @@ export function createAppStore(deps: AppStoreDeps) {
       deps,
       openLoadedDocument,
       offerRecovery,
-      reportSupportRepairs
     });
 
     const packageSlice = createPackageSlice(set, get, {
@@ -1304,7 +1279,6 @@ export function createAppStore(deps: AppStoreDeps) {
           // error and still applies. Restore it only over a clean state, never
           // over a fresh save failure that has more to say.
           if (libraryError && get().error === null) set({ error: libraryError });
-          if (loaded) reportSupportRepairs(loaded.supportRepairCount);
         } catch (error) {
           // Keep the app usable with an in-memory sample, but say plainly that
           // the saved project could not load — never silently substitute.
@@ -1543,12 +1517,16 @@ export function createAppStore(deps: AppStoreDeps) {
             });
             return;
           }
-          const { project, supportRepairCount } = migrateProjectWithReport(record.project);
+          // The library is already in state, and the v7→v8 step needs it to
+          // recognise a box monitor's implicit pedestal (see
+          // ProjectMigrationContext).
+          const { project } = migrateProjectWithReport(record.project, {
+            artworks: get().libraryArtworks
+          });
           // Persist what setDocument actually opened: a snapshot may hold a
           // document the load repair links up, and writing the pre-repair copy
           // back would settle on "Saved" over a document that is not.
           const opened = setDocument(project, { viewMode: "plan", saveState: "saving" });
-          reportSupportRepairs(supportRepairCount);
           await persist(opened);
           // Not openLoadedDocument: this path already persists what it opened,
           // and the document at risk here is the one being replaced, which the

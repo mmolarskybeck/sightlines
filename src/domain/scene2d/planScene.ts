@@ -17,10 +17,6 @@ import {
   segmentPlanRect,
   type PlanRect
 } from "../geometry/planObjects";
-import {
-  resolveFloorSupport,
-  supportPlanRect
-} from "../geometry/supportGlyphs";
 import { effectiveWallObjectPlanDepthMm } from "../placement/artworkForm";
 import type { Point } from "../geometry/polygon";
 import type {
@@ -109,24 +105,17 @@ export type PlanSceneWallObject = {
 export type PlanSceneFloorObject = {
   object: FloorObject;
   artwork?: Artwork;
-  // The WORK's own footprint — unchanged by a support, which never resizes the
-  // work it carries.
+  // The object's own footprint. A support is an ORDINARY floor object here
+  // (schema v8): it gets its own entry with its own rect, rather than riding
+  // on the entry of the work standing on it.
   rect: PlanRect;
-  // The block the work stands on, when it stands on one (an explicit pedestal/
-  // plinth, or a box monitor's resolved default — resolveFloorSupport settles
-  // both). Present only when there IS one, so an ordinary placement's entry
-  // keeps exactly the key set it had before supports existed.
-  //
-  // The rect is the SUPPORT's footprint in the same floor space as `rect`, with
-  // the offset already rotated into place: consumers draw it FIRST, beneath the
-  // work, and never re-derive it. `hasBonnet` rather than the bonnet's height
-  // because plan is a top-down drawing — the glass shows as a dashed outline at
-  // this same footprint and its height is invisible from above.
-  support?: {
-    rect: PlanRect;
-    hasBonnet: boolean;
-    kind: FloorSupportKind;
-  };
+  // Support-only, present exactly when `object.kind === "support"`, so every
+  // other entry keeps precisely the key set it had before supports existed.
+  // `hasBonnet` rather than the bonnet's height because plan is a top-down
+  // drawing — the glass shows as a dashed outline at this same footprint and
+  // its height is invisible from above.
+  supportKind?: FloorSupportKind;
+  hasBonnet?: boolean;
 };
 
 export type PlanScene = {
@@ -165,7 +154,11 @@ export function planScenePaintOrder<
   F extends { object: { kind: string } }
 >(wallObjects: readonly W[], floorObjects: readonly F[]): PlanScenePaintEntry<W, F>[] {
   const isUnderlay = (entry: { object: { kind: string } }) =>
-    entry.object.kind === "case" || entry.object.kind === "shelf";
+    entry.object.kind === "case" ||
+    entry.object.kind === "shelf" ||
+    // A support is furniture that carries works, so it paints with the other
+    // furniture and beneath every artwork — the same reason a case does.
+    entry.object.kind === "support";
   return [
     ...wallObjects.filter(isUnderlay).map((entry): PlanScenePaintEntry<W, F> => ({ group: "wall", entry })),
     ...floorObjects.filter(isUnderlay).map((entry): PlanScenePaintEntry<W, F> => ({ group: "floor", entry })),
@@ -399,24 +392,28 @@ export function buildPlanScene(project: Project, options: PlanSceneOptions = {})
     ];
   });
 
-  const floorObjects: PlanSceneFloorObject[] = project.floorObjects.map((object) => {
+  // Supports FIRST, then everything else, each group in its stored order
+  // (floor-supports spec §6): a pedestal has to paint beneath the work standing
+  // on it, and consumers draw this array in order. Hit-testing reads the same
+  // order in reverse, so riders keep hitting above their support.
+  const toSceneFloorObject = (object: FloorObject): PlanSceneFloorObject => {
     const artwork = object.kind === "artwork" ? artworksById?.get(object.artworkId) : undefined;
-    const support = resolveFloorSupport(object, artwork);
     return {
       object,
       ...(artwork ? { artwork } : {}),
       rect: getFloorObjectPlanRect(object),
-      ...(support
+      ...(object.kind === "support"
         ? {
-            support: {
-              rect: supportPlanRect(object, support),
-              hasBonnet: support.bonnetHeightMm !== undefined,
-              kind: support.kind
-            }
+            supportKind: object.supportKind,
+            hasBonnet: object.bonnetHeightMm !== undefined
           }
         : {})
     };
-  });
+  };
+  const floorObjects: PlanSceneFloorObject[] = [
+    ...project.floorObjects.filter((object) => object.kind === "support"),
+    ...project.floorObjects.filter((object) => object.kind !== "support")
+  ].map(toSceneFloorObject);
 
   return { rooms, partitions, openingConnections, wallObjects, floorObjects };
 }

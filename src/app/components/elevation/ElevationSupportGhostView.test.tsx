@@ -1,8 +1,9 @@
-// The wiring half of the box-monitor ghost: ElevationView has to hand the
-// scene's SUPPORT span and bonnet through to the component, and fold the
-// monitor into the dimension neighbour pool at the ASSEMBLY's full height —
-// plinth plus whatever rises off it. The component's own geometry is covered in
-// ElevationMonitorGhost.test.tsx.
+// The wiring half of the floor-support ghosts: ElevationView has to collect the
+// room's SUPPORT floor objects, hand them to the scene builder, draw the ghost
+// they produce, stand a rider's cabinet at its own base height, and fold the
+// support into the dimension neighbour pool at its full height — the block plus
+// whatever rises off it. The components' own geometry is covered in
+// ElevationMonitorGhost.test.tsx and the scene builder's in elevationScene.test.
 import { render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSampleProject } from "../../../domain/sample/sampleProject";
@@ -12,7 +13,7 @@ import type {
   Artwork,
   ArtworkFloorObject,
   ArtworkWallObject,
-  FloorSupport
+  SupportFloorObject
 } from "../../../domain/project";
 import { useAppStore } from "../../store";
 import { TooltipProvider } from "../ui/tooltip";
@@ -58,20 +59,19 @@ const HUNG_WORK: Artwork = {
   metadata: {}
 };
 
-// A 150mm plinth under the cabinet with a 450mm bonnet over it: the bonnet
-// out-tops the 375mm cabinet, so the assembly is 600mm, not 525mm.
-const BONNETED_PLINTH: FloorSupport = {
-  kind: "plinth",
-  widthMm: 900,
-  depthMm: 900,
-  heightMm: 150,
-  bonnetHeightMm: 450
-};
+// A 150mm plinth with a 450mm bonnet over it: the bonnet out-tops the 375mm
+// cabinet standing on it, so the volume in front of the wall is 600mm, not 525.
+const BONNET_HEIGHT_MM = 450;
+const PLINTH_HEIGHT_MM = 150;
 
-// Places the cabinet just inside the sample room's first wall so its footprint
-// projects onto that wall — the same setup ElevationSupportedGhostView uses.
+// Places the cabinet (and, when asked, the plinth under it) just inside the
+// sample room's first wall so their footprints project onto that wall.
 function setup(
-  options: { support?: FloorSupport; wallObjects?: ArtworkWallObject[] } = {}
+  options: {
+    plinth?: boolean;
+    bonnet?: boolean;
+    wallObjects?: ArtworkWallObject[];
+  } = {}
 ) {
   const project = createSampleProject();
   const wall = getWallsWithGeometry(project.floor.rooms[0]!.room)[0]!;
@@ -89,12 +89,25 @@ function setup(
     heightMm: 375,
     rotationDeg: 0,
     wallYMm: 1450,
-    ...(options.support ? { support: options.support } : {})
+    ...(options.plinth ? { baseHeightMm: PLINTH_HEIGHT_MM } : {})
+  };
+  const support: SupportFloorObject = {
+    id: "fobj-plinth",
+    kind: "support",
+    supportKind: "plinth",
+    xMm: midXMm,
+    yMm: midYMm,
+    widthMm: 900,
+    depthMm: 900,
+    rotationDeg: 0,
+    heightMm: PLINTH_HEIGHT_MM,
+    wallYMm: 0,
+    ...(options.bonnet ? { bonnetHeightMm: BONNET_HEIGHT_MM } : {})
   };
   useAppStore.setState({
     project: {
       ...project,
-      floorObjects: [floorObject],
+      floorObjects: options.plinth ? [support, floorObject] : [floorObject],
       ...(options.wallObjects ? { wallObjects: options.wallObjects } : {})
     }
   });
@@ -131,38 +144,42 @@ function renderView(
   );
 }
 
-describe("ElevationView — box-monitor ghosts", () => {
-  it("LEGACY: a default-pedestal monitor draws plinth and cabinet, no bonnet", () => {
+describe("ElevationView — floor-support ghosts", () => {
+  it("draws a bare-floor monitor's cabinet with no support ghost at all", () => {
     const { wall } = setup();
     const { container } = renderView(wall);
 
     const ghost = container.querySelector(".elevation-monitor-ghost")!;
     expect(ghost).not.toBeNull();
-    expect(ghost.querySelector(".monitor-ghost-pedestal")).not.toBeNull();
     expect(ghost.querySelector(".monitor-ghost-cabinet")).not.toBeNull();
-    expect(ghost.querySelector(".monitor-ghost-bonnet")).toBeNull();
+    expect(container.querySelector(".elevation-support-ghost")).toBeNull();
   });
 
-  it("draws the bonnet, and the plinth at its own wider span", () => {
-    const { wall } = setup({ support: BONNETED_PLINTH });
+  it("draws the plinth as its own ghost, at its own wider span, with its bonnet", () => {
+    const { wall } = setup({ plinth: true, bonnet: true });
     const { container } = renderView(wall);
 
-    const ghost = container.querySelector(".elevation-monitor-ghost")!;
-    const pedestal = ghost.querySelector(".monitor-ghost-pedestal")!;
-    const cabinet = ghost.querySelector(".monitor-ghost-cabinet")!;
-    const bonnet = ghost.querySelector(".monitor-ghost-bonnet")!;
-    // The 900mm plinth is drawn at ITS span; the 500mm cabinet at its own.
-    expect(Number(pedestal.getAttribute("width"))).toBeCloseTo(900);
-    expect(Number(cabinet.getAttribute("width"))).toBeCloseTo(500);
+    const support = container.querySelector(".elevation-support-ghost")!;
+    const block = support.querySelector(".support-ghost-block")!;
+    const bonnet = support.querySelector(".support-ghost-bonnet")!;
+    const cabinet = container.querySelector(".monitor-ghost-cabinet")!;
+    // The 900mm plinth draws at ITS span; the 500mm cabinet at its own.
+    expect(Number(block.getAttribute("width"))).toBeCloseTo(900);
+    expect(Number(block.getAttribute("height"))).toBeCloseTo(PLINTH_HEIGHT_MM);
     expect(Number(bonnet.getAttribute("width"))).toBeCloseTo(900);
-    expect(Number(bonnet.getAttribute("height"))).toBeCloseTo(450);
+    expect(Number(bonnet.getAttribute("height"))).toBeCloseTo(BONNET_HEIGHT_MM);
+    expect(Number(cabinet.getAttribute("width"))).toBeCloseTo(500);
+    // The cabinet stands ON the plinth: its top is the plinth's top plus its
+    // own height, i.e. it is drawn PLINTH_HEIGHT_MM higher than the block's top.
+    expect(Number(cabinet.getAttribute("y"))).toBeCloseTo(
+      Number(block.getAttribute("y")) - 375
+    );
   });
 
   it("bounds a vertical gap line at the BONNET's top when the bonnet out-tops the cabinet", () => {
-    // 150 plinth + a 450 bonnet over a 375 cabinet = a 600mm assembly. A work
-    // hung with its bottom edge 1000mm up should measure 400mm down to the
-    // glass — not 475mm to the cabinet's top, which is what ignoring the bonnet
-    // in the neighbour pool would print.
+    // A 150 plinth under a 450 bonnet is a 600mm volume. A work hung with its
+    // bottom edge 1000mm up should measure 400mm down to the glass — not 475mm
+    // to the cabinet's top, which is what ignoring the bonnet would print.
     const project = createSampleProject();
     const wall = getWallsWithGeometry(project.floor.rooms[0]!.room)[0]!;
     const hung: ArtworkWallObject = {
@@ -176,7 +193,8 @@ describe("ElevationView — box-monitor ghosts", () => {
       heightMm: 400
     };
     const { wall: sameWall } = setup({
-      support: BONNETED_PLINTH,
+      plinth: true,
+      bonnet: true,
       wallObjects: [hung]
     });
 

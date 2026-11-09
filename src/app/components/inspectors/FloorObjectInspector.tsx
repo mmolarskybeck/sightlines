@@ -30,7 +30,12 @@ export function FloorPlacementFields({
     "xMm" | "yMm" | "widthMm" | "depthMm" | "heightMm" | "rotationDeg" | "baseHeightMm"
   >;
   onCommitPosition: (xMm: number, yMm: number) => void;
-  onCommitSize: (widthMm: number, depthMm: number) => void;
+  // The footprint pair (Width/Depth). Optional on the same "omit the prop to
+  // hide the field" rule the three below already follow, and for one caller:
+  // the floor-ARTWORK branch, where the box's Width/Depth/Height live inside
+  // the Footprint summary row instead (floor-supports spec §7), so rendering
+  // them here as well would ask the same question twice on one panel.
+  onCommitSize?: (widthMm: number, depthMm: number) => void;
   // Angle (rotationDeg) applies to every floor-object kind — FloorObjectBox
   // already rotates a blocked zone's flat wash and a case's box exactly like
   // it rotates artwork; only the numeric control to REACH an arbitrary angle
@@ -94,28 +99,30 @@ export function FloorPlacementFields({
         />
       </InspectorFieldGrid>
 
-      <InspectorFieldGrid columns={2}>
-        <LengthField
-          compact
-          positiveOnly
-          label="Width"
-          valueMm={floorObject.widthMm}
-          displayUnit={size.displayUnit}
-          parseUnit={size.parseUnit}
-          placeholder={size.placeholder}
-          onCommit={(widthMm) => onCommitSize(widthMm, floorObject.depthMm)}
-        />
-        <LengthField
-          compact
-          positiveOnly
-          label="Depth"
-          valueMm={floorObject.depthMm}
-          displayUnit={size.displayUnit}
-          parseUnit={size.parseUnit}
-          placeholder={size.placeholder}
-          onCommit={(depthMm) => onCommitSize(floorObject.widthMm, depthMm)}
-        />
-      </InspectorFieldGrid>
+      {onCommitSize ? (
+        <InspectorFieldGrid columns={2}>
+          <LengthField
+            compact
+            positiveOnly
+            label="Width"
+            valueMm={floorObject.widthMm}
+            displayUnit={size.displayUnit}
+            parseUnit={size.parseUnit}
+            placeholder={size.placeholder}
+            onCommit={(widthMm) => onCommitSize(widthMm, floorObject.depthMm)}
+          />
+          <LengthField
+            compact
+            positiveOnly
+            label="Depth"
+            valueMm={floorObject.depthMm}
+            displayUnit={size.displayUnit}
+            parseUnit={size.parseUnit}
+            placeholder={size.placeholder}
+            onCommit={(depthMm) => onCommitSize(floorObject.widthMm, depthMm)}
+          />
+        </InspectorFieldGrid>
+      ) : null}
 
       {onCommitHeight ? (
         <InspectorFieldGrid columns={2}>

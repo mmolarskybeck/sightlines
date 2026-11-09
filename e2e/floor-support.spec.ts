@@ -1,192 +1,198 @@
-import { expect, test, addArtwork, gotoApp, placeArtworkOnWall, switchView } from "./fixtures";
+import { expect, test, addArtwork, clickCanvasAt, gotoApp } from "./fixtures";
+import type { Locator, Page } from "playwright/test";
 
-// Floor supports (pedestal / plinth / plexi bonnet) are an ATTACHED block on a
-// floor placement, which makes almost every claim about them a claim about two
-// surfaces at once: the inspector writes one merged, normalised support, and
-// plan, elevation and the ghost toggle all have to be reading the same resolved
-// answer. A unit test can hold the store and any one renderer together while
-// the other renderer draws nothing at all — the pedestal that never appears
-// under the sculpture is precisely the failure this spec exists to catch.
+// Floor supports (pedestal / plinth) are standalone floor objects (schema v8,
+// docs/floor-supports-spec.md) modelled on shelves: a support carries whatever
+// works overlap its top face at the right height, and that "Support" reading
+// is DERIVED on every render rather than stored on the work. That makes the
+// interesting claims cross-cutting in exactly the shape e2e/shelf-snap.spec.ts
+// already argues for shelves — a checklist drop, a plan drag, an inspector
+// action and a delete all have to agree on the same seating, and a unit test
+// can hold the store and one renderer together while another draws nothing.
 //
-// Everything below runs off ONE placed work, converted to the floor by the
-// inspector's Type control (see artwork-placement-type.spec.ts).
-async function placeFloorWorkOnPedestal(page: import("playwright/test").Page) {
-  await gotoApp(page);
-  await addArtwork(page);
-  await placeArtworkOnWall(page);
+// Plan's SVG user space is floor-space millimetres (see PlanView's viewBox),
+// so getBBox on an object's own .plan-object-outline gives exact model
+// numbers there. Playwright's boundingBox() inflates every rect by its stroke
+// and shadow, which is enough to blur a real move from noise — so every
+// geometry assertion below reads getBBox mm-space, the method
+// e2e/shelf-snap.spec.ts uses for elevation. None of the objects here rotate,
+// so an outline's own getBBox (unaffected by the ancestor <g>'s rotate
+// transform) already equals its floor-space rect.
 
-  await page.locator("li.checklist-row").first().click();
-  const inspector = page.getByRole("complementary", { name: "Inspector" });
-  await inspector
-    .getByRole("radiogroup", { name: "Placement type" })
-    .getByRole("radio", { name: "Floor", exact: true })
-    .click();
-  await expect(inspector).toContainText("Position on floor");
+type MmBox = { x: number; y: number; width: number; height: number };
 
-  // "Stands on" replaces the monitor-only "On pedestal" switch: four mutually
-  // exclusive states in one select. A bare floor work reads "Floor".
-  const standsOn = inspector.getByRole("combobox", { name: "Stands on" });
-  await expect(standsOn).toContainText("Floor");
-  await standsOn.click();
-  await page.getByRole("option", { name: "Pedestal", exact: true }).click();
-  await expect(standsOn).toContainText("Pedestal");
-
-  // The support fields arriving IS the confirmation that a support was written
-  // to the placement, not just a label changed.
-  await expect(inspector.getByLabel("Support width")).toBeVisible();
-  // ...and "Height off floor" is withheld while a support is present: the
-  // work's bottom edge is the support's top, so the suspension field would be
-  // offering a number nothing reads.
-  await expect(inspector.getByLabel("Height off floor")).toHaveCount(0);
-
-  return inspector;
+async function mmBoxOf(locator: Locator): Promise<MmBox> {
+  return await locator.evaluate((element) => {
+    const box = (element as SVGGraphicsElement).getBBox();
+    return { x: box.x, y: box.y, width: box.width, height: box.height };
+  });
 }
 
-test("a pedestal draws under the work in plan, and the assembly drags as one object", async ({
+type Box = { x: number; y: number; width: number; height: number };
+
+async function boxOf(locator: Locator): Promise<Box> {
+  const box = await locator.boundingBox();
+  if (!box) throw new Error("Expected the element to have a bounding box.");
+  return box;
+}
+
+// A LengthField with a step control renders its two stepper buttons inside
+// the label, so getByLabel resolves to three nodes. Address the input by
+// role, anchored at the field's own name (e2e/shelf-snap.spec.ts's helper).
+const lengthField = (inspector: Locator, label: string) =>
+  inspector.getByRole("textbox", { name: new RegExp(`^${label}`) });
+
+// The derived "Support" row's value cell — InspectorSummaryRow renders label
+// and value as sibling spans inside one .inspector-summary-row, and "Support"
+// is the only row with that exact label (docs/floor-supports-spec.md §7).
+const supportRowValue = (inspector: Locator) =>
+  inspector.locator(
+    '.inspector-summary-row:has(.inspector-summary-row-label:text-is("Support")) .inspector-summary-row-value'
+  );
+
+// The first LengthField edit on a freshly opened panel leaves that field
+// focused; the very next click is eaten by its own blur commit rather than
+// reaching its real target. Clicking the panel heading first spends that
+// blur harmlessly (trap noted in docs/decisions.md, 2026-09-18).
+async function blurFocusedField(inspector: Locator) {
+  await inspector.locator("h2").first().click();
+}
+
+// Places a pedestal on open floor via the Insert tool, widens it so the
+// checklist drop below and the later plan-drag grab both land unambiguously
+// inside its footprint (rather than the smaller work centred on it), then
+// drags a checklist work onto its footprint. Ends with the work SELECTED and
+// its Support row already read as "On pedestal" — the state both test (a)
+// and test (c) build on.
+async function placeWorkOnPedestal(page: Page) {
+  await gotoApp(page);
+  await addArtwork(page);
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+
+  const insert = page.getByRole("group", { name: "Insert" });
+  await insert.getByRole("button", { name: "Pedestal", exact: true }).click();
+
+  const plan = page.locator("svg.plan-svg").first();
+  await expect(plan).toBeVisible();
+  // Open floor, clear of the default room's walls.
+  await clickCanvasAt(plan, 0.32, 0.55);
+
+  const support = plan.locator(".plan-object--support");
+  await expect(support).toHaveCount(1);
+
+  // Placing selects the new pedestal, so its inspector (SupportInspector) is
+  // already open. Widen it well past a default work's floor footprint so the
+  // drop below lands centred well inside it, leaving a wide unambiguous
+  // margin to grab the pedestal by later without touching the work.
+  await lengthField(inspector, "Width").fill("1.6 m");
+  await lengthField(inspector, "Width").press("Enter");
+  await lengthField(inspector, "Depth").fill("1.6 m");
+  await lengthField(inspector, "Depth").press("Enter");
+  await blurFocusedField(inspector);
+
+  const planBox = await boxOf(plan);
+  const supportBox = await boxOf(support);
+  await page.locator("li.checklist-row").first().dragTo(plan, {
+    targetPosition: {
+      x: supportBox.x + supportBox.width / 2 - planBox.x,
+      y: supportBox.y + supportBox.height / 2 - planBox.y
+    }
+  });
+
+  const artwork = plan.locator(".plan-object--artwork");
+  await expect(artwork).toHaveCount(1);
+  await artwork.click({ force: true });
+  await expect(supportRowValue(inspector)).toHaveText(/^On pedestal/);
+
+  return { inspector, plan, support, artwork };
+}
+
+test("a work dropped on a pedestal stands on it, and the pedestal drags the work with it", async ({
   page
 }) => {
-  const inspector = await placeFloorWorkOnPedestal(page);
+  const { plan, support, artwork } = await placeWorkOnPedestal(page);
 
-  // A wide pedestal, so the reveal around the work is big enough to grab by —
-  // the thing being tested is that the support rect is part of the work's own
-  // hit target, and that needs somewhere to press that is support and not work.
-  await inspector.getByLabel("Support width").fill("1.6 m");
-  await inspector.getByLabel("Support width").press("Enter");
-  await inspector.getByLabel("Support depth").fill("1.6 m");
-  await inspector.getByLabel("Support depth").press("Enter");
+  // --- Drag the pedestal in plan: the work rides along. -------------------
+  const supportOutline = support.locator(".plan-object-outline");
+  const workOutline = artwork.locator(".plan-object-outline");
+  const beforeSupport = await mmBoxOf(supportOutline);
+  const beforeWork = await mmBoxOf(workOutline);
 
-  await switchView(page, "Plan");
-  const plan = page.locator("svg:has(.plan-object-hit)").first();
-  await expect(plan).toBeVisible();
-
-  // A SECOND rect beneath the work, in the same rotate group: the pedestal.
-  const assembly = plan.locator(".plan-object:has(.plan-object-support)");
-  await expect(assembly).toHaveCount(1);
-  const supportRect = assembly.locator(".plan-object-support");
-  const workRect = assembly.locator(".plan-object-outline");
-  await expect(supportRect).toHaveCount(1);
-  await expect(workRect).toHaveCount(1);
-
-  // Walk the assembly off the wall into open floor FIRST, by the work rect.
-  // The work was converted from a wall placement and still sits against that
-  // wall, where a drag that stays inside the wall's capture radius re-adopts it
-  // as a wall placement — which correctly parks the support in floor memory and
-  // would leave nothing to measure below.
-  const planBox = (await plan.boundingBox())!;
-  const firstWork = (await workRect.boundingBox())!;
-  await page.mouse.move(firstWork.x + firstWork.width / 2, firstWork.y + firstWork.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(planBox.x + planBox.width * 0.45, planBox.y + planBox.height * 0.55, {
-    steps: 14
-  });
-  await page.mouse.up();
-  // The support survived a drag of the work itself — it is attached to the
-  // placement, not to the spot on the floor.
-  await expect(supportRect).toHaveCount(1);
-
-  const supportBefore = (await supportRect.boundingBox())!;
-  const workBefore = (await workRect.boundingBox())!;
-  const hitBefore = (await assembly.locator(".plan-object-hit").boundingBox())!;
-  // The support really is drawn wider than the work it carries (overhang off
-  // grows the support, never shrinks the work).
-  expect(supportBefore.width).toBeGreaterThan(workBefore.width);
-
-  // Press on the pedestal's reveal — inside the support, outside the work's own
-  // pointer rect. Asserted rather than assumed: if the work's hit rect covered
-  // this point the drag below would prove nothing about the support.
-  const grab = {
-    x: supportBefore.x + 6,
-    y: supportBefore.y + supportBefore.height / 2
-  };
-  expect(grab.x).toBeLessThan(hitBefore.x);
-
-  const deltaX = 120;
+  // Grab a corner of the (much wider) pedestal, clear of the smaller work
+  // centred on it, so the drag begins on the SUPPORT's own hit rect.
+  const supportBox = await boxOf(support);
+  const grab = { x: supportBox.x + 10, y: supportBox.y + 10 };
   await page.mouse.move(grab.x, grab.y);
   await page.mouse.down();
-  await page.mouse.move(grab.x + deltaX, grab.y, { steps: 12 });
+  await page.mouse.move(grab.x + 140, grab.y + 70, { steps: 16 });
   await page.mouse.up();
 
-  // BOTH rects travel, by the same amount: one placement, one offset, one drag.
   await expect
-    .poll(async () => Math.round((await supportRect.boundingBox())!.x - supportBefore.x))
-    .toBeGreaterThan(deltaX / 2);
-  const supportAfter = (await supportRect.boundingBox())!;
-  const workAfter = (await workRect.boundingBox())!;
-  expect(workAfter.x - workBefore.x).toBeCloseTo(supportAfter.x - supportBefore.x, 0);
-  expect(supportAfter.width).toBeCloseTo(supportBefore.width, 0);
-  expect(workAfter.width).toBeCloseTo(workBefore.width, 0);
+    .poll(async () => Math.round((await mmBoxOf(supportOutline)).x - beforeSupport.x))
+    .toBeGreaterThan(60);
+
+  const afterSupport = await mmBoxOf(supportOutline);
+  const afterWork = await mmBoxOf(workOutline);
+  const deltaX = afterSupport.x - beforeSupport.x;
+  const deltaY = afterSupport.y - beforeSupport.y;
+
+  expect(afterWork.x - beforeWork.x).toBeCloseTo(deltaX, 0);
+  expect(afterWork.y - beforeWork.y).toBeCloseTo(deltaY, 0);
+  // Rigid: neither rect changed shape, only position.
+  expect(afterSupport.width).toBeCloseTo(beforeSupport.width, 0);
+  expect(afterWork.width).toBeCloseTo(beforeWork.width, 0);
+
+  void plan;
 });
 
-test("the elevation draws a supported ghost from the floor line, and H hides it", async ({
+test('"Put on pedestal" creates a pedestal under a floor work, and "Set on floor" leaves the pedestal standing', async ({
   page
 }) => {
-  await placeFloorWorkOnPedestal(page);
+  await gotoApp(page);
+  await addArtwork(page);
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
 
-  await switchView(page, "Elevation");
-  const elevation = page.locator("svg:has(rect.wall-fill)").first();
-  await expect(elevation).toBeVisible();
+  // A work placed directly on open floor (no support anywhere yet).
+  const plan = page.locator("svg.plan-svg").first();
+  await expect(plan).toBeVisible();
+  const planBox = await boxOf(plan);
+  await page.locator("li.checklist-row").first().dragTo(plan, {
+    targetPosition: { x: planBox.width * 0.4, y: planBox.height * 0.45 }
+  });
 
-  const ghost = elevation.locator("g.elevation-supported-artwork-ghost");
-  await expect(ghost).toHaveCount(1);
-  const support = ghost.locator(".supported-artwork-ghost-support");
-  const work = ghost.locator(".supported-artwork-ghost-work");
-  await expect(support).toHaveCount(1);
-  await expect(work).toHaveCount(1);
+  const artwork = plan.locator(".plan-object--artwork");
+  await expect(artwork).toHaveCount(1);
+  await artwork.click({ force: true });
+  await expect(inspector).toContainText("Position on floor");
+  await expect(supportRowValue(inspector)).toHaveText("On the floor");
+  await expect(plan.locator(".plan-object--support")).toHaveCount(0);
 
-  // The support box sits UNDER the work box: the ghost is drawn from the floor
-  // line up, which is the whole point of a pedestal on an elevation.
-  const supportBox = (await support.boundingBox())!;
-  const workBox = (await work.boundingBox())!;
-  expect(supportBox.y).toBeGreaterThan(workBox.y);
+  await blurFocusedField(inspector);
+  await inspector.getByRole("button", { name: "Put on pedestal", exact: true }).click();
 
-  // H joins this ghost to the rest of the ghost family (monitor, suspended,
-  // floor case) rather than giving it a toggle of its own. Focus has to leave
-  // the inspector's fields first — the shortcut is correctly ignored while an
-  // editable element has it.
-  await elevation.focus();
-  await page.keyboard.press("h");
-  await expect(ghost).toHaveCount(0);
-  await page.keyboard.press("h");
-  await expect(ghost).toHaveCount(1);
+  await expect(plan.locator(".plan-object--support")).toHaveCount(1);
+  await expect(supportRowValue(inspector)).toHaveText(/^On pedestal/);
+
+  await inspector.getByRole("button", { name: "Set on floor", exact: true }).click();
+
+  await expect(supportRowValue(inspector)).toHaveText("On the floor");
+  // The pedestal itself is untouched by taking the work off it.
+  await expect(plan.locator(".plan-object--support")).toHaveCount(1);
 });
 
-test("enabling the plexi bonnet grows a pedestal that was tight to the work", async ({
-  page
-}) => {
-  const inspector = await placeFloorWorkOnPedestal(page);
+test("deleting a pedestal sets its works on the floor", async ({ page }) => {
+  const { inspector, plan, artwork } = await placeWorkOnPedestal(page);
 
-  // Shrink the pedestal to the work's own footprint: typing anything smaller is
-  // clamped UP to it while overhang is off, so this is the tightest legal
-  // pedestal and the field reads back what was actually stored.
-  const widthField = inspector.getByLabel("Support width");
-  const depthField = inspector.getByLabel("Support depth");
-  await widthField.fill("1 cm");
-  await widthField.press("Enter");
-  await depthField.fill("1 cm");
-  await depthField.press("Enter");
-  const tightWidth = await widthField.inputValue();
-  const tightDepth = await depthField.inputValue();
+  await inspector.getByRole("button", { name: "Select pedestal", exact: true }).click();
+  await expect(inspector.getByRole("button", { name: "Delete pedestal", exact: true })).toBeVisible();
 
-  await switchView(page, "Plan");
-  const plan = page.locator("svg:has(.plan-object-hit)").first();
-  const assembly = plan.locator(".plan-object:has(.plan-object-support)");
-  const supportRect = assembly.locator(".plan-object-support");
-  const tightBox = (await supportRect.boundingBox())!;
+  await inspector.getByRole("button", { name: "Delete pedestal", exact: true }).click();
 
-  // The glass needs its own thickness plus clearance on every side, and the
-  // bonnet's footprint IS the support's (USER DECISION 2026-09-17) — so the
-  // support has to grow rather than the work being squeezed.
-  await inspector.getByLabel("Plexi bonnet").click();
+  // Exact copy the store emits (src/app/store/floorObjectSlice.ts), singular
+  // work count for this one-rider setup.
+  await expect(page.getByText("Pedestal removed; 1 work set on the floor.")).toBeVisible();
 
-  await expect(assembly.locator(".plan-object-support-bonnet")).toHaveCount(1);
-  await expect(widthField).not.toHaveValue(tightWidth);
-  await expect(depthField).not.toHaveValue(tightDepth);
-  const grownBox = (await supportRect.boundingBox())!;
-  expect(grownBox.width).toBeGreaterThan(tightBox.width);
-  expect(grownBox.height).toBeGreaterThan(tightBox.height);
-
-  // Overhang is not a choice you get to make under glass: the switch stays, and
-  // says why, rather than disappearing.
-  await expect(inspector.getByLabel("Allow overhang")).toBeDisabled();
-  await expect(inspector).toContainText("A bonnet keeps the work inside the support.");
+  await expect(plan.locator(".plan-object--support")).toHaveCount(0);
+  await artwork.click({ force: true });
+  await expect(supportRowValue(inspector)).toHaveText("On the floor");
 });

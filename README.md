@@ -179,7 +179,7 @@ Examples:
 * Four display types — wall work, wall projection, box monitor, sculpture — derived from a free-text Medium field with an explicit override.
 * Neighbor-aware dimension lines between placed works.
 * Placement warnings for overlaps and out-of-bounds works.
-* Floor objects in plan view with snapping, rotation, suspension height, per-face images, back-to-back pairing, and wall ⇄ floor conversion.
+* Floor objects in plan view with snapping, rotation, suspension height, per-face images, back-to-back pairing, and wall ⇄ floor conversion; pedestals, plinths, and wall shelves are their own objects that several works can stand on.
 * Multi-select, group drag, and equal wall distribution.
 * Checklist search, filtering, sorting, and artist grouping, with sort and grouping stored on the project.
 * Derived 3D preview with artwork textures, true shared openings, hinged leaves, partition slabs, cases, monitors, and camera presets — editable by drop-to-place, arrow nudge, and pointer drag, with numeric precision left to the inspector and elevation.

@@ -72,6 +72,11 @@ export type ResolvedPlacement = PlanPlacement | { anchor: "none" };
 // floatPolicyForKind — see ResolvedPlacement for why the stage is kept.
 export type FloatPolicy = "float" | "capture-any" | "reject" | "floor-only";
 
+// Every kind a plan gesture can be MOVING. Wall objects plus "support", the one
+// floor kind with no wall twin (schema v8): a pedestal is dragged in plan like
+// any other object, it simply can never capture a wall.
+export type PlanMovingKind = WallObject["kind"] | "support";
+
 // The per-kind policy that used to be spread across callers as
 // `canFloat: kind === ...`. Blocked zones float, doors/windows capture at any
 // distance, and artwork floats exactly as a case does: it captures a wall within
@@ -90,7 +95,10 @@ export type FloatPolicy = "float" | "capture-any" | "reject" | "floor-only";
 // control still converts an existing placement via
 // store.setArtworkPlacementForm), but it never gates placement, so it is not a
 // parameter here any more.
-export function floatPolicyForKind(kind: WallObject["kind"]): FloatPolicy {
+// A pedestal or plinth has no wall twin at all, so it never appears here: a
+// support drags floor-only (floatPolicyForMovingObject settles that before it
+// reaches this function).
+export function floatPolicyForKind(kind: PlanMovingKind): FloatPolicy {
   if (kind === "artwork") return "float";
   if (kind === "blocked-zone") return "float";
   // A case floats like a blocked zone: it captures a wall only within capture
@@ -161,7 +169,7 @@ export function resolvePlanPlacement(
     // the editable floor default, not 150mm. The two coincide only for a case.
     // Omitted → the nominal band, which is what every non-protruding kind wants.
     wallFootprintDepthMm?: number;
-    movingKind: WallObject["kind"];
+    movingKind: PlanMovingKind;
     // Per-kind behavior when no wall captures — see FloatPolicy /
     // floatPolicyForKind.
     floatPolicy: FloatPolicy;
@@ -407,7 +415,7 @@ function resolveOnWall(
     movingSize: PlanMovingSize;
     wallFootprintWidthMm?: number;
     wallFootprintDepthMm?: number;
-    movingKind: WallObject["kind"];
+    movingKind: PlanMovingKind;
     thresholdMm: number;
     previousSnapTargetIds?: SnapTargetIds;
     // Floor-space grid targets from getGridSnapTargets, reused here (Phase 5a)

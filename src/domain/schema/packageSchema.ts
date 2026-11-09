@@ -215,8 +215,10 @@ export function readPackageManifest(input: unknown): SightlinesPackage {
   // migrateProject / migrateArtwork throw their own human-readable errors
   // (wrong shape, newer-than-app embedded documents, failed validation) —
   // pass those through untouched.
-  const project = migrateProject(envelope.project);
+  // The artworks go in FIRST because the project's own v7→v8 step has to join
+  // through them to recognise a box monitor (see ProjectMigrationContext).
   const artworks = envelope.artworks.map((artwork) => migrateArtwork(artwork));
+  const project = migrateProject(envelope.project, { artworks });
 
   try {
     const assets = envelope.assets.map((asset) => packageAssetEntrySchema.parse(asset));

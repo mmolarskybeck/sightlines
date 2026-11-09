@@ -50,74 +50,48 @@ function renderMarks(marks: JSX.Element | JSX.Element[]) {
 describe("ExportPdfPreview — plan support marks", () => {
   const xf = planTransform(BOUNDS, fitBoundsToRect(BOUNDS, RECT));
 
-  it("draws the support polygon beneath the work, at the scene's own footprint", () => {
-    // Deliberately wider than the work: this is what a re-derived
-    // "same as the placement" footprint would get wrong.
+  it("draws a support's own footprint, filled and undashed, from its scene entry", () => {
+    // Deliberately wider than a work: this is what a re-derived "same as the
+    // placement" footprint would get wrong.
     const supportRect: PlanRect = { ...workRect, widthMm: 900, depthMm: 700 };
     const { container } = renderMarks(
-      planObjectMarks(workRect, "artwork", true, false, xf, "fobj-0", undefined, {
-        rect: supportRect,
-        hasBonnet: false
-      })
+      planObjectMarks(supportRect, "support", true, false, xf, "fobj-0")
     );
 
     const polygons = Array.from(container.querySelectorAll("polygon"));
-    // Support first, then the work's own footprint — the canvas's and the PDF
-    // writer's paint order.
-    expect(polygons.length).toBeGreaterThanOrEqual(2);
-    const supportSpanPt =
-      900 * xf.scalePtPerMm;
-    const firstXs = polygons[0]!
+    // One footprint, and nothing else: a support has no inner mark.
+    expect(polygons).toHaveLength(1);
+    const xs = polygons[0]!
       .getAttribute("points")!
       .split(" ")
       .map((pair) => Number(pair.split(",")[0]));
-    expect(Math.max(...firstXs) - Math.min(...firstXs)).toBeCloseTo(supportSpanPt);
-    const secondXs = polygons[1]!
-      .getAttribute("points")!
-      .split(" ")
-      .map((pair) => Number(pair.split(",")[0]));
-    expect(Math.max(...secondXs) - Math.min(...secondXs)).toBeCloseTo(
-      workRect.widthMm * xf.scalePtPerMm
-    );
+    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(900 * xf.scalePtPerMm);
+    // A support is a solid volume seen from above — never the floor object's
+    // dashed outline.
+    expect(polygons[0]!.getAttribute("stroke-dasharray")).toBeFalsy();
   });
 
   it("adds a dashed bonnet polygon at the same footprint, and only with a bonnet", () => {
     const supportRect: PlanRect = { ...workRect, widthMm: 900, depthMm: 700 };
-    // A FLOOR placement's own outline is already dashed, so the bonnet has to
-    // be identified by its footprint (the support's, 900 wide) rather than by
-    // counting dashed polygons.
-    const dashedWidthsPt = (container: Element) =>
-      Array.from(container.querySelectorAll("polygon[stroke-dasharray]")).map(
-        (polygon) => {
-          const xs = polygon
-            .getAttribute("points")!
-            .split(" ")
-            .map((pair) => Number(pair.split(",")[0]));
-          return Math.max(...xs) - Math.min(...xs);
-        }
-      );
+    const dashedCount = (container: Element) =>
+      container.querySelectorAll("polygon[stroke-dasharray]").length;
 
     const { container: plain } = renderMarks(
-      planObjectMarks(workRect, "artwork", true, false, xf, "fobj-0", undefined, {
-        rect: supportRect,
-        hasBonnet: false
-      })
+      planObjectMarks(supportRect, "support", true, false, xf, "fobj-0")
     );
-    expect(dashedWidthsPt(plain)).not.toContain(900 * xf.scalePtPerMm);
+    expect(dashedCount(plain)).toBe(0);
 
     const { container: bonneted } = renderMarks(
-      planObjectMarks(workRect, "artwork", true, false, xf, "fobj-0", undefined, {
-        rect: supportRect,
-        hasBonnet: true
-      })
+      planObjectMarks(supportRect, "support", true, false, xf, "fobj-0", undefined, true)
     );
-    // Bonnet footprint = support footprint (USER DECISION 2026-09-17).
-    expect(dashedWidthsPt(bonneted)).toContain(900 * xf.scalePtPerMm);
+    // Bonnet footprint = support footprint (USER DECISION 2026-09-17), so the
+    // dash is the whole of what distinguishes it.
+    expect(dashedCount(bonneted)).toBe(1);
   });
 
-  it("draws no support marks for a work standing on the bare floor", () => {
+  it("ignores hasBonnet on a work, which keeps exactly the marks it always had", () => {
     const { container } = renderMarks(
-      planObjectMarks(workRect, "artwork", true, false, xf, "fobj-0")
+      planObjectMarks(workRect, "artwork", true, false, xf, "fobj-0", undefined, true)
     );
     // The footprint plus the generic artwork inset — what it drew before
     // supports existed.
@@ -125,9 +99,9 @@ describe("ExportPdfPreview — plan support marks", () => {
   });
 });
 
-describe("ExportPdfPreview — elevation supported-artwork ghost marks", () => {
+describe("ExportPdfPreview — elevation support ghost marks", () => {
   function scene(
-    ghost: Partial<ElevationScene["supportedArtworkGhosts"][number]> = {}
+    ghost: Partial<ElevationScene["supportGhosts"][number]> = {}
   ): ElevationScene {
     return {
       wallLengthMm: 4000,
@@ -141,18 +115,13 @@ describe("ExportPdfPreview — elevation supported-artwork ghost marks", () => {
       shelves: [],
       floorCaseGhosts: [],
       suspendedArtworkGhosts: [],
-      supportedArtworkGhosts: [
+      supportGhosts: [
         {
-          kind: "supported-artwork",
-          objectId: "fobj-1",
+          objectId: "support-1",
           xMinMm: 1000,
           xMaxMm: 1600,
-          supportHeightMm: 1100,
-          workHeightMm: 400,
-          workXMinMm: 1100,
-          workXMaxMm: 1500,
-          supportXMinMm: 1000,
-          supportXMaxMm: 1600,
+          heightMm: 1100,
+          supportKind: "pedestal",
           ...ghost
         }
       ],
@@ -177,36 +146,30 @@ describe("ExportPdfPreview — elevation supported-artwork ghost marks", () => {
     );
   }
 
-  it("draws the support on the floor line and the work on top, each on its own span", () => {
+  it("draws the block on the floor line at the projected span", () => {
     const { container } = renderMarks(
       elevationPageMarks(scene(), bounds, xf, settings(), false)
     );
 
     const rects = ghostRects(container);
-    expect(rects).toHaveLength(2);
-    const [support, work] = rects;
-    // This surface is SVG-y-down from the wall top: the support's TOP is
-    // 3000 - 1100 = 1900 down, the work's is 3000 - 1500 = 1500 down.
-    expect(Number(support!.getAttribute("y"))).toBeCloseTo(1900 * xf.scalePtPerMm);
-    expect(Number(support!.getAttribute("height"))).toBeCloseTo(1100 * xf.scalePtPerMm);
-    expect(Number(support!.getAttribute("x"))).toBeCloseTo(1000 * xf.scalePtPerMm);
-    expect(Number(support!.getAttribute("width"))).toBeCloseTo(600 * xf.scalePtPerMm);
-
-    expect(Number(work!.getAttribute("y"))).toBeCloseTo(1500 * xf.scalePtPerMm);
-    expect(Number(work!.getAttribute("height"))).toBeCloseTo(400 * xf.scalePtPerMm);
-    // The work's own narrower span, not the assembly's.
-    expect(Number(work!.getAttribute("x"))).toBeCloseTo(1100 * xf.scalePtPerMm);
-    expect(Number(work!.getAttribute("width"))).toBeCloseTo(400 * xf.scalePtPerMm);
+    expect(rects).toHaveLength(1);
+    const block = rects[0]!;
+    // This surface is SVG-y-down from the wall top: the block's TOP is
+    // 3000 - 1100 = 1900 down.
+    expect(Number(block.getAttribute("y"))).toBeCloseTo(1900 * xf.scalePtPerMm);
+    expect(Number(block.getAttribute("height"))).toBeCloseTo(1100 * xf.scalePtPerMm);
+    expect(Number(block.getAttribute("x"))).toBeCloseTo(1000 * xf.scalePtPerMm);
+    expect(Number(block.getAttribute("width"))).toBeCloseTo(600 * xf.scalePtPerMm);
   });
 
-  it("adds the bonnet from the support's top at the support's footprint", () => {
+  it("adds the bonnet from the top face at the support's footprint", () => {
     const { container } = renderMarks(
       elevationPageMarks(scene({ bonnetHeightMm: 475 }), bounds, xf, settings(), false)
     );
 
     const rects = ghostRects(container);
-    expect(rects).toHaveLength(3);
-    const bonnet = rects[2]!;
+    expect(rects).toHaveLength(2);
+    const bonnet = rects[1]!;
     // 3000 - (1100 + 475) = 1425 down from the wall top.
     expect(Number(bonnet.getAttribute("y"))).toBeCloseTo(1425 * xf.scalePtPerMm);
     expect(Number(bonnet.getAttribute("height"))).toBeCloseTo(475 * xf.scalePtPerMm);
@@ -230,18 +193,15 @@ describe("ExportPdfPreview — elevation monitor ghost marks", () => {
       shelves: [],
       floorCaseGhosts: [],
       suspendedArtworkGhosts: [],
-      supportedArtworkGhosts: [],
+      supportGhosts: [],
       monitorGhosts: [
         {
           object: { id: "floor-monitor" } as ElevationScene["monitorGhosts"][number]["object"],
-          // A 500mm cabinet on its own 800mm default pedestal: the legacy
-          // shape, where the plinth's span and the cabinet's coincide.
+          // A 500mm cabinet standing on the bare floor.
           xMinMm: 2750,
           xMaxMm: 3250,
           monitorHeightMm: 375,
-          pedestalHeightMm: 800,
-          supportXMinMm: 2750,
-          supportXMaxMm: 3250,
+          baseHeightMm: 0,
           ...ghost
         }
       ],
@@ -265,54 +225,29 @@ describe("ExportPdfPreview — elevation monitor ghost marks", () => {
     );
   }
 
-  it("LEGACY: plinth, cabinet and screen at the cabinet's own span, no bonnet", () => {
+  it("draws the cabinet and its screen on the floor line, and no plinth", () => {
     const { container } = renderMarks(
       elevationPageMarks(scene(), bounds, xf, settings(), false)
     );
 
     const rects = ghostRects(container);
-    expect(rects).toHaveLength(3);
-    const [pedestal, cabinet] = rects;
-    // SVG-y-down from the wall top: the plinth's TOP is 3000 - 800 = 2200 down.
-    expect(Number(pedestal!.getAttribute("y"))).toBeCloseTo(2200 * xf.scalePtPerMm);
-    expect(Number(pedestal!.getAttribute("x"))).toBeCloseTo(2750 * xf.scalePtPerMm);
-    expect(Number(pedestal!.getAttribute("width"))).toBeCloseTo(500 * xf.scalePtPerMm);
-    expect(Number(cabinet!.getAttribute("y"))).toBeCloseTo(1825 * xf.scalePtPerMm);
+    // Cabinet + screen only.
+    expect(rects).toHaveLength(2);
+    const cabinet = rects[0]!;
+    // SVG-y-down from the wall top: the cabinet's TOP is 3000 - 375 = 2625 down.
+    expect(Number(cabinet.getAttribute("y"))).toBeCloseTo(2625 * xf.scalePtPerMm);
+    expect(Number(cabinet.getAttribute("x"))).toBeCloseTo(2750 * xf.scalePtPerMm);
+    expect(Number(cabinet.getAttribute("width"))).toBeCloseTo(500 * xf.scalePtPerMm);
   });
 
-  it("draws an EXPLICIT plinth and its bonnet across the SUPPORT's span", () => {
+  it("lifts a RIDER cabinet to its base height — the pedestal's top face", () => {
     const { container } = renderMarks(
-      elevationPageMarks(
-        scene({
-          pedestalHeightMm: 150,
-          supportXMinMm: 2650,
-          supportXMaxMm: 3550,
-          bonnetHeightMm: 450
-        }),
-        bounds,
-        xf,
-        settings(),
-        false
-      )
+      elevationPageMarks(scene({ baseHeightMm: 800 }), bounds, xf, settings(), false)
     );
 
-    const rects = ghostRects(container);
-    // Plinth, cabinet, screen, bonnet.
-    expect(rects).toHaveLength(4);
-    const pedestal = rects[0]!;
-    expect(Number(pedestal.getAttribute("x"))).toBeCloseTo(2650 * xf.scalePtPerMm);
-    expect(Number(pedestal.getAttribute("width"))).toBeCloseTo(900 * xf.scalePtPerMm);
-    // The cabinet keeps its own, narrower span.
-    expect(Number(rects[1]!.getAttribute("x"))).toBeCloseTo(2750 * xf.scalePtPerMm);
-    expect(Number(rects[1]!.getAttribute("width"))).toBeCloseTo(500 * xf.scalePtPerMm);
-
-    const bonnet = rects[3]!;
-    // 3000 - (150 + 450) = 2400 down from the wall top.
-    expect(Number(bonnet.getAttribute("y"))).toBeCloseTo(2400 * xf.scalePtPerMm);
-    expect(Number(bonnet.getAttribute("height"))).toBeCloseTo(450 * xf.scalePtPerMm);
-    // Bonnet footprint = support footprint (USER DECISION 2026-09-17).
-    expect(Number(bonnet.getAttribute("x"))).toBeCloseTo(2650 * xf.scalePtPerMm);
-    expect(Number(bonnet.getAttribute("width"))).toBeCloseTo(900 * xf.scalePtPerMm);
+    const cabinet = ghostRects(container)[0]!;
+    // 3000 - (800 + 375) = 1825 down from the wall top.
+    expect(Number(cabinet.getAttribute("y"))).toBeCloseTo(1825 * xf.scalePtPerMm);
   });
 });
 
@@ -380,7 +315,7 @@ describe("ExportPdfPreview — shelf marks", () => {
       ],
       floorCaseGhosts: [],
       suspendedArtworkGhosts: [],
-      supportedArtworkGhosts: [],
+      supportGhosts: [],
       monitorGhosts: [],
       partitionProfiles: []
     };

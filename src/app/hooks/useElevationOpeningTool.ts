@@ -74,7 +74,12 @@ export function useElevationOpeningTool(options: {
   // the committed result creates a new wall object instead of moving one.
   // Doors must sit on the floorline, so their preview y is pinned to heightMm/2.
   function resolveOpeningTool(proposed: Vector2) {
-    if (!activeTool || !openingToolSize) return null;
+    // A pedestal has no elevation form at all — it is a floor object with no
+    // wall twin — and it is filtered out of the elevation Insert cluster
+    // (App.tsx). The guard is the type-level statement of that: the resolver
+    // below only speaks wall kinds. The store still refuses the placement, so
+    // a caller reaching it another way gets a sentence rather than silence.
+    if (!activeTool || activeTool === "support" || !openingToolSize) return null;
     const result = resolveElevationPlacement(
       proposed,
       openingToolSize,

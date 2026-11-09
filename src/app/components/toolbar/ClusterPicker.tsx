@@ -192,7 +192,9 @@ function ClusterPicker({
               ) : (
                 <>
                   {entry.hint}
-                  <ToolbarTooltipKbd hint={entry.kbd} />
+                  {/* A tool with no accelerator (the pedestal) shows the hint
+                      alone rather than an empty key chip. */}
+                  {entry.kbd ? <ToolbarTooltipKbd hint={entry.kbd} /> : null}
                 </>
               )}
             </TooltipContent>

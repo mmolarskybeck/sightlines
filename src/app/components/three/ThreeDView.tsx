@@ -26,6 +26,7 @@ import {
 import { getPlaceableFloorWalls } from "../../../domain/geometry/planObjects";
 import { deriveScene3d } from "../../../domain/geometry/scene3d";
 import { effectiveFloorDepthMm } from "../../../domain/placement/artworkForm";
+import { getSupportRiders, resolveFloorStandsOn } from "../../../domain/placement/floorRiders";
 import { getShelfRiders } from "../../../domain/placement/shelfRiders";
 import {
   getEffectivePlacementSizeMm,
@@ -497,11 +498,13 @@ export function ThreeDView({
 
     const floorObject = project.floorObjects.find((object) => object.id === objectId);
     if (!floorObject) return null;
-    return {
-      anchor: "floor",
+    const floorBase = {
+      anchor: "floor" as const,
       objectId,
+      kind: floorObject.kind,
       xMm: floorObject.xMm,
       yMm: floorObject.yMm,
+      rotationDeg: floorObject.rotationDeg,
       dims: {
         wallWidthMm: floorObject.widthMm,
         wallHeightMm: floorObject.heightMm,
@@ -509,6 +512,40 @@ export function ThreeDView({
         floorDepthMm: floorObject.depthMm
       }
     };
+
+    // A SUPPORT drags as an ASSEMBLY too: the pedestal plus the works standing
+    // on it, derived here exactly as the shelf branch above (floorRiders.ts's
+    // mirror of shelfRiders.ts). No width/height on each rider — a floor drag
+    // never clamps to a wall run, so there is nothing to keep whole beyond the
+    // rigid translation itself.
+    if (floorObject.kind === "support") {
+      return {
+        ...floorBase,
+        riders: getSupportRiders(floorObject, project.floorObjects, artworksById).map(
+          (rider) => ({
+            id: rider.id,
+            offsetMm: {
+              xMm: rider.xMm - floorObject.xMm,
+              yMm: rider.yMm - floorObject.yMm
+            }
+          })
+        )
+      };
+    }
+
+    // An ARTWORK that starts the gesture standing on a support keeps clamping
+    // onto that same support for the rest of the drag (floor-supports spec §4
+    // "Overhang") — resolved once here, at gesture start, exactly as the
+    // shelf's riders are.
+    if (floorObject.kind === "artwork") {
+      const standsOn = resolveFloorStandsOn(floorObject, project.floorObjects, artworksById);
+      return {
+        ...floorBase,
+        startingSupportId: standsOn.kind === "support" ? standsOn.support.id : undefined
+      };
+    }
+
+    return floorBase;
   }
 
   const {
@@ -577,6 +614,10 @@ export function ThreeDView({
           // precision bypass elevation uses — held, the work hangs freely.
           wallObjects: project.wallObjects,
           seatOnShelves: !(event.metaKey || event.ctrlKey),
+          // A support is the floor twin of a shelf-as-surface (floor-supports
+          // spec §4): the same modifier bypasses both together.
+          floorObjects: project.floorObjects,
+          seatOnSupports: !(event.metaKey || event.ctrlKey),
           ...(shelfSource && !hopArmed ? { stickToWallId: shelfSource.wallId } : {})
         }) ?? current.move;
 
@@ -774,6 +815,15 @@ export function ThreeDView({
     (objectDrag?.active && objectDrag.move?.anchor === "wall"
       ? objectDrag.move.shelfId
       : undefined) ?? dropShelfId;
+
+  // The floor twin: the support a live object drag of a floor artwork would
+  // seat its work on (resolveFloorArtworkDragSeat, via resolveDragMove).
+  // Drives SupportMesh's own snap-target outline. No checklist-drop half yet
+  // (the 3D floor drop does not resolve support seating in this round).
+  const supportSnapTargetId =
+    objectDrag?.active && objectDrag.move?.anchor === "floor"
+      ? objectDrag.move.supportId
+      : undefined;
 
   // The dragged work's image aspect, so a partial/unknown-dimension work
   // previews at its true proportions — the same read placeArtwork itself makes
@@ -1211,6 +1261,7 @@ export function ThreeDView({
           artworksById={artworksById}
           selectedObjectIds={selectedObjectIds}
           shelfSnapTargetId={shelfSnapTargetId}
+          supportSnapTargetId={supportSnapTargetId}
           selectedArtworkId={selectedArtworkId}
           selectedWallId={selectedWallId}
           onSelectWall={onSelectWall}

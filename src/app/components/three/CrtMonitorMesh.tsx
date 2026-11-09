@@ -6,17 +6,10 @@ import {
 } from "../../../domain/geometry/monitorGlyphs";
 import { textureNativeAspect } from "./artworkFit";
 import { mmToWorld } from "./coordinates";
-import { floorSupportLayoutMm } from "./FloorObjectBox";
 import { planRotationToYaw } from "./planRotation";
 import { SelectionBoxOutline } from "./UncertaintyOutline";
 import { useSelectableFloorObject } from "./useSelectableFloorObject";
-import {
-  CASE_BODY_COLOR,
-  CASE_GLASS_COLOR,
-  CASE_GLASS_OPACITY,
-  MONITOR_BODY_COLOR,
-  MONITOR_SCREEN_COLOR
-} from "./tokens";
+import { MONITOR_BODY_COLOR, MONITOR_SCREEN_COLOR } from "./tokens";
 
 // How far the screen (and, ahead of it, the image) floats off the cabinet's
 // front face so the coplanar surfaces can't z-fight. Same 1mm step and same
@@ -28,38 +21,20 @@ const IMAGE_LIFT_MM = 2;
 // Outset of the selection outline, matching every other selected thing in 3D.
 const SELECTION_OUTLINE_OUTSET_MM = 20;
 
-// The bonnet's glass, identical to FloorObjectBox's and the vitrine cap's in
-// CaseMesh.tsx: one glass language across the app (the 2D glyphs share
-// CASE_GLASS_THICKNESS_MM for the same reason). Restated locally rather than
-// imported from either, exactly as planRotationToYaw above is — no component
-// should have to import another's render internals.
-const GLASS_MATERIAL_PROPS = {
-  color: CASE_GLASS_COLOR,
-  transparent: true,
-  opacity: CASE_GLASS_OPACITY,
-  depthWrite: false
-} as const;
-
 // Where every box in a monitor assembly sits, in mm off the floor and in the
 // placement's own rotated local frame — the pure half of the component, split
-// out for the reason FloorObjectBox.tsx splits floorSupportLayoutMm out: the
-// arithmetic is all there is to get wrong, and testing it does not need an R3F
-// renderer.
+// out because the arithmetic is all there is to get wrong and testing it does
+// not need an R3F renderer.
 //
-// It IS floorSupportLayoutMm, with the cabinet standing in for "the work" —
-// deliberately the same helper rather than a monitor-shaped copy, so a plinth
-// under a CRT and a plinth under a sculpture can never disagree about where
-// its top face, its bonnet or the assembly's bounding box are. The only thing
-// added here is the no-support fallback: a cabinet on the bare floor, whose
-// outline is its own box.
+// Schema v8: whatever the cabinet is standing on is its OWN floor object with
+// its own mesh, so the only question left here is how high the cabinet's bottom
+// edge is — `baseHeightMm`, which is a pedestal's top face for a monitor
+// standing on one and 0 on the bare floor.
 export type CrtMonitorLayoutMm = {
   // Center height of the cabinet box.
   cabinetCenterYMm: number;
-  // The resolved support layout, or null when the cabinet is on the floor.
-  support: ReturnType<typeof floorSupportLayoutMm>;
-  // The box the selection outline wraps, BEFORE its outset: the assembly union
-  // (cabinet ∪ offset plinth ∪ bonnet) when there is a support, the cabinet
-  // alone otherwise.
+  // The box the selection outline wraps, BEFORE its outset: the cabinet alone.
+  // The pedestal under it draws — and selects — as the separate object it is.
   outline: {
     widthMm: number;
     heightMm: number;
@@ -71,31 +46,17 @@ export type CrtMonitorLayoutMm = {
 };
 
 export function crtMonitorLayoutMm(object: FloorObject3d): CrtMonitorLayoutMm {
-  const support = floorSupportLayoutMm(object);
-  if (!support) {
-    return {
-      cabinetCenterYMm: object.heightMm / 2,
-      support: null,
-      outline: {
-        widthMm: object.widthMm,
-        heightMm: object.heightMm,
-        depthMm: object.depthMm,
-        centerYMm: object.heightMm / 2,
-        offsetXMm: 0,
-        offsetZMm: 0
-      }
-    };
-  }
+  const baseHeightMm = Math.max(0, object.baseHeightMm ?? 0);
+  const centerYMm = baseHeightMm + object.heightMm / 2;
   return {
-    cabinetCenterYMm: support.workCenterYMm,
-    support,
+    cabinetCenterYMm: centerYMm,
     outline: {
-      widthMm: support.assemblyWidthMm,
-      heightMm: support.assemblyHeightMm,
-      depthMm: support.assemblyDepthMm,
-      centerYMm: support.assemblyCenterYMm,
-      offsetXMm: support.assemblyOffsetXMm,
-      offsetZMm: support.assemblyOffsetZMm
+      widthMm: object.widthMm,
+      heightMm: object.heightMm,
+      depthMm: object.depthMm,
+      centerYMm,
+      offsetXMm: 0,
+      offsetZMm: 0
     }
   };
 }
@@ -112,26 +73,15 @@ export function crtMonitorLayoutMm(object: FloorObject3d): CrtMonitorLayoutMm {
 //
 // WHAT THE STORED GEOMETRY MEANS HERE: widthMm/heightMm/depthMm are the CABINET
 // — the box, and nothing else. The pedestal is NOT in heightMm; it arrives
-// already resolved on the scene entry (FloorObject3d.support — an explicit
-// pedestal/plinth the curator authored, or the monitor's own absent-means-
-// pedestal default), and is absent when the cabinet stands on the bare floor.
-// That split is deliberate: toggling the pedestal off must not rewrite the
-// placement's geometry (and toggling it back on must not have to guess what the
-// cabinet's own height was), so the stored number stays the one thing the
-// curator can type in the inspector's Height field and the support stays a pure
-// display decision.
+// — the box, and nothing else. Whatever it stands on is a separate support
+// floor object with its own mesh (schema v8), so toggling a pedestal off never
+// rewrites the placement's geometry: the stored number stays the one thing the
+// curator types in the inspector's Height field.
 //
-// TRAP: the pedestal's FOOTPRINT is the support's, not the cabinet's, and so is
-// the bonnet's. Those coincide for the monitor default (which is sized to its
-// monitor) and diverge the moment a curator stands the cabinet on a named
-// plinth — reading object.widthMm/depthMm here would silently shrink that
-// plinth to the box, and the selection outline has to wrap the union of the
-// three rather than the cabinet alone.
-//
-// baseHeightMm is deliberately IGNORED, exactly as FloorCaseMesh ignores it: a
-// monitor stands on a pedestal or on the floor, and hanging one from ceiling
-// wires is not a thing this type represents. The inspector withholds the
-// "Height off floor" field for the same reason.
+// `baseHeightMm` IS read here, unlike in FloorCaseMesh: for a monitor it is not
+// a suspension height (a monitor never hangs — the inspector withholds "Height
+// off floor" for it) but the height of the pedestal it is standing on, written
+// by the seating rule. A cabinet on the bare floor has 0.
 export function CrtMonitorMesh({
   object,
   texture,
@@ -147,12 +97,7 @@ export function CrtMonitorMesh({
   const z = mmToWorld(object.yMm);
   const yaw = planRotationToYaw(object.rotationDeg);
 
-  // What the cabinet stands on, resolved once in the scene (resolveFloorSupport:
-  // an explicit block wins, else absent monitorSupport means the 800mm default
-  // pedestal, else nothing) and laid out by the SAME helper FloorObjectBox uses
-  // — never re-derived here.
   const layout = crtMonitorLayoutMm(object);
-  const support = layout.support;
   const monitorHeightMm = object.heightMm;
 
   // Bezel at true mm — there is no zoom here to clamp for. Null on a cabinet
@@ -183,36 +128,6 @@ export function CrtMonitorMesh({
 
   return (
     <group position={[x, 0, z]} rotation={[0, yaw, 0]}>
-      {/* The support block, at ITS OWN footprint and offset (the monitor
-          default's happens to be the cabinet's). CASE_BODY_COLOR white so it
-          reads as gallery furniture of the same family as a vitrine's body
-          rather than as a second, paler artwork box. Lambert like every other
-          volume in the scene.
-
-          Local x is the placement's width and local z its depth inside this
-          yawed group, and the support's stored offsets are in that same rotated
-          local frame (offsetYMm is the depth axis, which planRotationToYaw maps
-          onto world +z), so the offsets apply with no sign flip. */}
-      {support ? (
-        <mesh
-          position={[
-            mmToWorld(support.supportOffsetXMm),
-            mmToWorld(support.supportCenterYMm),
-            mmToWorld(support.supportOffsetZMm)
-          ]}
-          {...pointerProps}
-        >
-          <boxGeometry
-            args={[
-              mmToWorld(support.supportWidthMm),
-              mmToWorld(support.supportHeightMm),
-              mmToWorld(support.supportDepthMm)
-            ]}
-          />
-          <meshLambertMaterial color={CASE_BODY_COLOR} />
-        </mesh>
-      ) : null}
-
       {/* The cabinet, sitting on top of whatever is (or isn't) beneath it. */}
       <group position={[0, mmToWorld(layout.cabinetCenterYMm), 0]}>
         <mesh {...pointerProps}>
@@ -263,43 +178,9 @@ export function CrtMonitorMesh({
         ) : null}
       </group>
 
-      {/* The plexi bonnet over the cabinet: a glass box at the PLINTH's
-          footprint and offset (bonnet footprint = support footprint, USER
-          DECISION 2026-09-17) rising from its top face, in the same glass the
-          vitrine cap and FloorObjectBox's bonnet use. Drawn after the cabinet
-          and its picture so the transparent material composites over them, and
-          carrying the same pointer handlers as every other sub-mesh — a curator
-          clicking the glass has clicked the installation.
-
-          A LOCKED bonnet may be SHORTER than the cabinet it covers (the
-          normaliser warns rather than growing it); the cabinet then pokes out
-          of its top, which is exactly the collision the inspector is warning
-          about and must be visible here. */}
-      {support?.bonnet ? (
-        <mesh
-          position={[
-            mmToWorld(support.supportOffsetXMm),
-            mmToWorld(support.bonnet.centerYMm),
-            mmToWorld(support.supportOffsetZMm)
-          ]}
-          {...pointerProps}
-        >
-          <boxGeometry
-            args={[
-              mmToWorld(support.supportWidthMm),
-              mmToWorld(support.bonnet.heightMm),
-              mmToWorld(support.supportDepthMm)
-            ]}
-          />
-          <meshLambertMaterial {...GLASS_MATERIAL_PROPS} />
-        </mesh>
-      ) : null}
-
-      {/* One outline around the WHOLE assembly — plinth, bonnet and the
-          plinth's own OFFSET included — because the thing that got selected is
-          the installation, not the cabinet on top of it. The union comes from
-          the shared assemblyPlanRect (via floorSupportLayoutMm), so an offset
-          plinth shifts the box instead of being cropped out of it.
+      {/* One outline around the CABINET. The pedestal under it is its own
+          object and wraps its own outline when IT is selected (floor-supports
+          spec §6: the selection box wraps only the selected object).
           No dashed uncertainty outline: unlike a sculpture's bounding box, this
           volume is equipment at standard dimensions, so the work's own
           dimension status says nothing about how big the monitor is. */}

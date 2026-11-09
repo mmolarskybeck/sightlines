@@ -18,7 +18,7 @@ import type {
   SyncMetaRepository
 } from "../domain/repositories/syncMetaRepository";
 import { parseArtwork, parseAsset } from "../domain/schema/artworkSchema";
-import { normalizeProjectFloorSupports, parseProject } from "../domain/schema/projectSchema";
+import { parseProject } from "../domain/schema/projectSchema";
 
 export class InMemoryProjectRepository implements ProjectRepository {
   projects = new Map<string, Project>();
@@ -29,17 +29,14 @@ export class InMemoryProjectRepository implements ProjectRepository {
     return project;
   }
 
-  // Runs the load boundary's support normaliser and nothing else. The real
-  // repository's report falls out of migrating on read; the fake cannot re-parse
-  // here without breaking load()'s identity guarantee (tests assert a clean
-  // document comes back byte-identical, where a real IndexedDB read always hands
-  // back a structured clone). normalizeProjectFloorSupports is the same function
-  // the real load boundary runs, and it returns the stored object unchanged when
-  // there is nothing to repair.
+  // The real repository's report falls out of migrating on read; the fake
+  // cannot re-parse here without breaking load()'s identity guarantee (tests
+  // assert a clean document comes back byte-identical, where a real IndexedDB
+  // read always hands back a structured clone), and with supports modelled as
+  // ordinary floor objects there is nothing left to repair at the boundary.
   async loadWithReport(id: string): Promise<ProjectLoadReport> {
     const stored = await this.load(id);
-    const { project, supportRepairCount } = normalizeProjectFloorSupports(stored);
-    return { project, supportRepairCount, stored };
+    return { project: stored, stored };
   }
 
   async create(project: Project): Promise<boolean> {

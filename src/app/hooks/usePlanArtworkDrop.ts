@@ -25,6 +25,7 @@ import {
   type WallObjectBase
 } from "../../domain/project";
 import { seatOnAnyOverlappingShelf } from "../../domain/placement/shelfSeating";
+import { seatOnAnyOverlappingSupport } from "../../domain/placement/floorRiders";
 import { floatPolicyForKind, resolvePlanPlacement } from "../../domain/snapping/planSnapTargets";
 import type { SnapTargetIds } from "../../domain/snapping/resolveSnap";
 import {
@@ -66,7 +67,14 @@ export function usePlanArtworkDrop(options: {
         seatOnShelfId?: string
       ) => void)
     | undefined;
-  onPlaceArtworkOnFloor: ((artworkId: string, xMm: number, yMm: number) => void) | undefined;
+  onPlaceArtworkOnFloor:
+    | ((
+        artworkId: string,
+        xMm: number,
+        yMm: number,
+        opts?: { bypassSeating?: boolean }
+      ) => void)
+    | undefined;
 }) {
   const {
     artworksById,
@@ -230,6 +238,28 @@ export function usePlanArtworkDrop(options: {
     );
   }
 
+  // The floor twin: would this FLOOR drop stand the work on a pedestal? Same
+  // "over it or not" reasoning as the shelf above — plan has no vertical axis —
+  // and the same ⌘/Ctrl bypass. Only the id is needed here: the store re-runs
+  // the seat itself after the real size is baked (placeArtworkOnFloor), so this
+  // is purely the ghost's announcement of what the release would do.
+  function supportSeatingForDrop(
+    placement: ReturnType<typeof resolveArtworkDrop>["placement"],
+    dims: ReturnType<typeof effectiveArtworkDims>,
+    bypassSnap: boolean
+  ): string | undefined {
+    if (bypassSnap || placement.anchor !== "floor") return undefined;
+    return seatOnAnyOverlappingSupport(
+      {
+        centerMm: { xMm: placement.xMm, yMm: placement.yMm },
+        widthMm: dims.widthMm,
+        depthMm: dims.depthMm,
+        rotationDeg: 0
+      },
+      project.floorObjects
+    )?.supportId;
+  }
+
   // Shared by the HTML5 dragover handler and the touch-drag subscription: given
   // client coordinates and the artwork being dragged, resolve the placement and
   // paint the drop ghost. Assumes the caller has already gated on an active
@@ -252,7 +282,10 @@ export function usePlanArtworkDrop(options: {
       activeGuides: result.activeGuides,
       // The slab this drop would seat the work on, so the plan glyph can light
       // up under the cursor — resolved exactly as the commit below resolves it.
-      shelfId: shelfSeatingForDrop(result.placement, dims, bypassSnap)?.shelfId
+      shelfId: shelfSeatingForDrop(result.placement, dims, bypassSnap)?.shelfId,
+      // The pedestal this drop would stand the work on, so its plan glyph can
+      // light up under the cursor — the floor half of the same announcement.
+      supportId: supportSeatingForDrop(result.placement, dims, bypassSnap)
     });
   }
 
@@ -281,7 +314,11 @@ export function usePlanArtworkDrop(options: {
     // writing it would cost a second undo step (same precedent as
     // setArtworkPlacementForm's conversion).
     if (placement.anchor === "floor") {
-      onPlaceArtworkOnFloor?.(artworkId, placement.xMm, placement.yMm);
+      // The seat itself is the store's to resolve (it has the baked size); the
+      // gesture only reports whether the curator asked for a free drop.
+      onPlaceArtworkOnFloor?.(artworkId, placement.xMm, placement.yMm, {
+        bypassSeating: bypassSnap
+      });
       return;
     }
     // `anchor: "none"` no longer occurs for an artwork drop (the policy above
