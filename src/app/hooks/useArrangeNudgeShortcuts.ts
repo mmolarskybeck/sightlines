@@ -14,6 +14,7 @@ import { isEditableTarget } from "./isEditableTarget";
 import { getNudgeStepMm } from "./nudgeStep";
 
 export type UseArrangeNudgeShortcutsParams = {
+  suspended?: boolean;
   project: Project | null;
   artworks: Artwork[];
   viewMode: ViewMode;
@@ -64,6 +65,7 @@ export type UseArrangeNudgeShortcutsParams = {
 // and every other case declines so the arrows fall through to the 3D camera
 // travel that owns them. See the viewMode gate below.
 export function useArrangeNudgeShortcuts({
+  suspended = false,
   project,
   artworks,
   viewMode,
@@ -81,6 +83,7 @@ export function useArrangeNudgeShortcuts({
   moveWallObjectsGroup
 }: UseArrangeNudgeShortcutsParams) {
   useEffect(() => {
+    if (suspended) return;
     const artworksById = new Map(artworks.map((artwork) => [artwork.id, artwork]));
     const withResolvedArtworkFootprint = (wallObject: WallObject): WallObject =>
       withArtworkFootprintFromMap(wallObject, artworksById);
@@ -372,6 +375,7 @@ export function useArrangeNudgeShortcuts({
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [
+    suspended,
     project,
     artworks,
     viewMode,

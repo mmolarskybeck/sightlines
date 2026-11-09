@@ -4,9 +4,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Artwork } from "../../../domain/project";
 import { MEDIUM_SUGGESTIONS } from "../../../domain/placement/mediumCategory";
 import { ArtworkInspector } from "./ArtworkInspector";
+
+let mockThumbnailUrl: string | undefined;
+vi.mock("../../hooks/useArtworkAsset", () => ({
+  useArtworkAsset: () => ({ asset: undefined, thumbnailUrl: mockThumbnailUrl })
+}));
 import { TooltipProvider } from "../ui/tooltip";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  mockThumbnailUrl = undefined;
+});
 
 // A fully complete record: title + artist + date, and known width/height —
 // isArtworkRecordComplete(baseArtwork) is true and getArtworkScaleState is
@@ -520,5 +528,28 @@ describe("ArtworkInspector metadata fields", () => {
     expect(screen.getByRole("textbox", { name: "Object no." })).toHaveValue(
       "325.1963"
     );
+  });
+});
+
+describe("ArtworkInspector image controls", () => {
+  it("offers Add image… for a work without an image and passes the chosen file", () => {
+    const onReplaceImage = vi.fn();
+    const { container } = renderInspector({ onReplaceImage });
+    expect(screen.getByRole("button", { name: /Add image/ })).toBeInTheDocument();
+    const file = new File(["x"], "a.png", { type: "image/png" });
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(onReplaceImage).toHaveBeenCalledWith(file);
+  });
+
+  it("offers Remove image in the Image options menu", async () => {
+    mockThumbnailUrl = "blob:thumb";
+    const onRemoveImage = vi.fn();
+    renderInspector({ onReplaceImage: vi.fn(), onRemoveImage });
+    const trigger = screen.getByRole("button", { name: "Image options" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter", code: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove image" }));
+    expect(onRemoveImage).toHaveBeenCalled();
   });
 });

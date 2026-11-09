@@ -13,7 +13,11 @@ const STORAGE_PORT = 5198;
 const STORAGE_ENV = {
   VITE_DROPBOX_CLIENT_ID: "e2e-test-client-id",
   VITE_CLOUD_BACKUP_SETTLE_MS: "500",
-  VITE_CLOUD_BACKUP_MIN_INTERVAL_MS: "1000"
+  VITE_CLOUD_BACKUP_MIN_INTERVAL_MS: "1000",
+  // Separate optimizer cache from the 5199 server: different env means a
+  // different config hash, and a shared cache makes each server re-optimize
+  // and 504 the other's deps ("Importing a module script failed" in WebKit).
+  SIGHTLINES_VITE_CACHE_DIR: "node_modules/.vite-e2e-storage"
 };
 
 const STORAGE_SAFETY = /storage-safety\.spec\.ts/;
