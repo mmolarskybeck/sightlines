@@ -1,16 +1,21 @@
 import { titleFromFilename } from "../../domain/assets/imageIntake";
 import { buildImageAsset, processImageFile } from "../../domain/assets/intakeImageFile";
 import { newId } from "../../domain/id";
+import type { PlacementForm } from "../../domain/placement/artworkForm";
+import { parseArtwork } from "../../domain/schema/artworkSchema";
 import {
   CURRENT_ARTWORK_SCHEMA_VERSION,
   type Artwork,
-  type Project
+  type FloorObject,
+  type Project,
+  type WallObject
 } from "../../domain/project";
 import type { ArtworkImportDraft } from "../../domain/spreadsheetImport/types";
 import type {
   AppState,
   AppStoreDeps,
   ArtworkImportDestination,
+  EditEntry,
   EditExtras
 } from "../store";
 import { NO_SELECTION, selectionWrite } from "./selectionSlice";
@@ -37,6 +42,27 @@ export type ArtworkIntakeSliceActions = {
   confirmDuplicateUploads: () => Promise<void>;
   dismissDuplicateUploads: () => void;
   removeArtworkFromChecklist: (artworkId: string) => Promise<void>;
+  // Batch removeArtworkFromChecklist: one undo entry for the whole set.
+  removeArtworksFromChecklist: (artworkIds: string[]) => Promise<void>;
+  // Library copies of each work (shared image asset, no accession number).
+  // Copies of checklisted works join the checklist right after their source in
+  // one undo entry; undo drops that membership and leaves the records. Returns
+  // the new ids.
+  duplicateArtworks: (artworkIds: string[]) => Promise<string[]>;
+  // A new image-less work, sized and typed up front, appended to the open
+  // checklist and selected. Returns its id, or null when nothing was created.
+  createBlankArtwork: (input: {
+    title?: string;
+    artist?: string;
+    widthMm: number;
+    heightMm: number;
+    placementForm: PlacementForm;
+  }) => Promise<string | null>;
+  // Processes `file` into a NEW asset (no hash reuse) and points the work at
+  // it as one undoable edit. The previous asset is never deleted.
+  setArtworkImage: (artworkId: string, file: File) => Promise<void>;
+  // Unlinks the work's image (undoable). The asset itself is never deleted.
+  removeArtworkImage: (artworkId: string) => Promise<void>;
   deleteLibraryArtworks: (artworkIds: string[]) => Promise<void>;
 };
 
@@ -342,34 +368,211 @@ export function createArtworkIntakeSlice(
     },
 
     async removeArtworkFromChecklist(artworkId) {
+      await get().removeArtworksFromChecklist([artworkId]);
+    },
+
+    async removeArtworksFromChecklist(artworkIds) {
       const project = get().project;
       if (!project) return;
 
-      const isChecklisted = project.checklistArtworkIds.includes(artworkId);
-      const isPlaced =
-        project.wallObjects.some(
-          (wallObject) => wallObject.kind === "artwork" && wallObject.artworkId === artworkId
-        ) ||
-        project.floorObjects.some(
-          (floorObject) => floorObject.kind === "artwork" && floorObject.artworkId === artworkId
-        );
-      if (!isChecklisted && !isPlaced) return;
+      const isArtworkPlacementOf = (object: WallObject | FloorObject, ids: Set<string>) =>
+        object.kind === "artwork" && ids.has(object.artworkId);
+      const requested = new Set(artworkIds);
+      const checklisted = new Set(project.checklistArtworkIds);
+      const placed = new Set(
+        [...project.wallObjects, ...project.floorObjects].flatMap((object) =>
+          object.kind === "artwork" && requested.has(object.artworkId) ? [object.artworkId] : []
+        )
+      );
+      const removed = new Set(
+        [...requested].filter((artworkId) => checklisted.has(artworkId) || placed.has(artworkId))
+      );
+      if (removed.size === 0) return;
 
       // Removing from a checklist unlinks it from this project only — the
       // library record is untouched (docs/plan.md §4.1). Also drops any
-      // placement referencing this artwork — on a wall or on the floor — a
-      // checklist entry with a dangling placement would be an invalid state
+      // placement referencing a removed artwork — on a wall or on the floor —
+      // a checklist entry with a dangling placement would be an invalid state
       // to leave behind.
-      await applyEdit("Remove from checklist", (current) => ({
+      const label =
+        removed.size === 1 ? "Remove from checklist" : `Remove ${removed.size} works from checklist`;
+      await applyEdit(label, (current) => ({
         ...current,
-        checklistArtworkIds: current.checklistArtworkIds.filter((id) => id !== artworkId),
+        checklistArtworkIds: current.checklistArtworkIds.filter((id) => !removed.has(id)),
         wallObjects: current.wallObjects.filter(
-          (wallObject) => !(wallObject.kind === "artwork" && wallObject.artworkId === artworkId)
+          (wallObject) => !isArtworkPlacementOf(wallObject, removed)
         ),
         floorObjects: current.floorObjects.filter(
-          (floorObject) => !(floorObject.kind === "artwork" && floorObject.artworkId === artworkId)
+          (floorObject) => !isArtworkPlacementOf(floorObject, removed)
         )
       }));
+    },
+
+    async duplicateArtworks(artworkIds) {
+      const projectId = get().project?.id;
+      const library = get().libraryArtworks;
+      const sources = [...new Set(artworkIds)].flatMap((artworkId) => {
+        const source = library.find((artwork) => artwork.id === artworkId);
+        return source ? [source] : [];
+      });
+      if (sources.length === 0) return [];
+
+      // Each copy is a new library record written OUTSIDE history, exactly as
+      // intake writes one; only checklist membership is undoable. The image
+      // asset is SHARED, not copied — deleteLibraryArtworks keeps an asset
+      // while any record still points at it.
+      const copyBySourceId = new Map<string, string>();
+      for (const source of sources) {
+        const copy: Artwork = {
+          ...structuredClone(source),
+          id: newId(),
+          title: `${source.title?.trim() || "Untitled"} (copy)`
+        };
+        delete copy.accessionNumber;
+        try {
+          await deps.artworkLibraryRepository.save(copy);
+          copyBySourceId.set(source.id, copy.id);
+        } catch (error) {
+          set({
+            error: `Could not duplicate ${source.title?.trim() || "that work"} (${
+              error instanceof Error ? error.message : "unknown error"
+            }).`
+          });
+        }
+      }
+      const newIds = [...copyBySourceId.values()];
+      if (newIds.length === 0) return [];
+      await republishLibrary();
+
+      const current = get().project;
+      if (!current) return newIds;
+      if (current.id !== projectId) {
+        set({
+          error:
+            "The copies were saved to the library, but were not added because the open project changed."
+        });
+        return newIds;
+      }
+
+      const checklisted = new Set(current.checklistArtworkIds);
+      const addedIds = [...copyBySourceId]
+        .filter(([sourceId]) => checklisted.has(sourceId))
+        .map(([, copyId]) => copyId);
+      if (addedIds.length === 0) return newIds;
+
+      const label =
+        addedIds.length === 1 ? "Duplicate artwork" : `Duplicate ${addedIds.length} works`;
+      await applyEdit(label, (project) => ({
+        ...project,
+        // Each copy lands directly after its own source.
+        checklistArtworkIds: project.checklistArtworkIds.flatMap((id) => {
+          const copyId = copyBySourceId.get(id);
+          return copyId ? [id, copyId] : [id];
+        })
+      }));
+      if (addedIds.length === 1) get().selectArtwork(addedIds[0]);
+      return newIds;
+    },
+
+    async createBlankArtwork(input) {
+      const project = get().project;
+      if (!project) return null;
+      const projectId = project.id;
+
+      const artist = input.artist?.trim();
+      let artwork: Artwork;
+      try {
+        artwork = parseArtwork({
+          id: newId(),
+          schemaVersion: CURRENT_ARTWORK_SCHEMA_VERSION,
+          title: input.title?.trim() || "Untitled",
+          ...(artist ? { artist } : {}),
+          dimensions: { widthMm: input.widthMm, heightMm: input.heightMm, status: "known" },
+          placementForm: input.placementForm,
+          metadata: {}
+        });
+      } catch {
+        set({ error: "Could not add that work (check its width and height)." });
+        return null;
+      }
+
+      // The record is written outside history (intake's rule); the undo entry
+      // covers only checklist membership.
+      try {
+        await deps.artworkLibraryRepository.save(artwork);
+      } catch (error) {
+        set({
+          error: `Could not add that work (${
+            error instanceof Error ? error.message : "unknown error"
+          }).`
+        });
+        return null;
+      }
+      await republishLibrary();
+
+      if (get().project?.id !== projectId) {
+        set({
+          error:
+            "The work was saved to the library, but was not added because the open project changed."
+        });
+        return artwork.id;
+      }
+      await applyEdit("Add artwork", (current) => ({
+        ...current,
+        checklistArtworkIds: [...current.checklistArtworkIds, artwork.id]
+      }));
+      get().selectArtwork(artwork.id);
+      return artwork.id;
+    },
+
+    async setArtworkImage(artworkId, file) {
+      const projectId = get().project?.id;
+
+      const processResult = await processImageFile(file, deps.imageProcessor);
+      if (!processResult.ok) {
+        set({ error: `Could not use that image (${processResult.reason}).` });
+        return;
+      }
+      // Always a NEW asset, never a hash match against an existing one: the
+      // old asset stays exactly as it was so undo can point back at it.
+      const asset = buildImageAsset(file, processResult.processed);
+      try {
+        await deps.assetRepository.saveAsset(asset, {
+          original: processResult.processed.original,
+          display: processResult.processed.display,
+          thumbnail: processResult.processed.thumbnail
+        });
+      } catch (error) {
+        set({
+          error: `Could not use that image (${
+            error instanceof Error ? error.message : "it could not be saved"
+          }).`
+        });
+        return;
+      }
+
+      // Re-read AFTER processing: the work may have been edited, deleted, or
+      // the project switched while the image was being processed.
+      const latest = get().libraryArtworks.find((artwork) => artwork.id === artworkId);
+      if (!latest) {
+        set({ error: "That work was deleted before its image finished processing." });
+        return;
+      }
+      if (get().project?.id !== projectId) {
+        set({ error: "The image was saved, but not applied because the open project changed." });
+        return;
+      }
+      await get().setArtworkAssetId(
+        artworkId,
+        asset.id,
+        latest.assetId ? "Replace image" : "Add image"
+      );
+    },
+
+    async removeArtworkImage(artworkId) {
+      const latest = get().libraryArtworks.find((artwork) => artwork.id === artworkId);
+      if (!latest?.assetId) return;
+      await get().setArtworkAssetId(artworkId, undefined, "Remove image");
     },
 
     async deleteLibraryArtworks(artworkIds) {
@@ -443,6 +646,52 @@ export function createArtworkIntakeSlice(
         // the records below — a partial cascade beats leaving live state
         // pointing at records we're about to erase.
       }
+
+      // HISTORY SAFETY. Undo/redo re-save an entry's artwork halves and
+      // reinstall its project halves, so a stack still naming a deleted work
+      // would resurrect its record (artwork halves) or its checklist entry and
+      // placements (project halves). Drop every entry that carries a deleted
+      // work's artwork half, strip deleted works out of every surviving
+      // project half, and keep alive every asset a surviving entry can still
+      // point a work back at (a replaced image's old asset, say).
+      const artworkHalvesOf = (entry: EditEntry) => [
+        ...(entry.artwork ? [entry.artwork] : []),
+        ...(entry.artworks ?? [])
+      ];
+      // Halves naming a deleted work are removed individually, so a bulk
+      // entry that also edited surviving works keeps those works' undo; an
+      // entry is dropped only when nothing undoable is left in it.
+      const isDeletedHalf = (half: { before: Artwork; after: Artwork }) =>
+        targetIds.has(half.before.id) || targetIds.has(half.after.id);
+      const cleanStack = (stack: EditEntry[]): EditEntry[] =>
+        stack.flatMap((entry): EditEntry[] => {
+          const next: EditEntry = { label: entry.label };
+          if (entry.artwork && !isDeletedHalf(entry.artwork)) next.artwork = entry.artwork;
+          const halves = entry.artworks?.filter((half) => !isDeletedHalf(half));
+          if (halves && halves.length > 0) next.artworks = halves;
+          if (entry.project) {
+            next.project = {
+              before: stripReferences(entry.project.before) ?? entry.project.before,
+              after: stripReferences(entry.project.after) ?? entry.project.after
+            };
+          }
+          const hadArtworkHalves = artworkHalvesOf(entry).length > 0;
+          const hasArtworkHalves = artworkHalvesOf(next).length > 0;
+          if (!next.project && !hasArtworkHalves) return [];
+          // An entry that only edited deleted works, alongside a project half,
+          // would replay a project change detached from its artwork change.
+          if (hadArtworkHalves && !hasArtworkHalves) return [];
+          return [next];
+        });
+      const undoStack = cleanStack(get().undoStack);
+      const redoStack = cleanStack(get().redoStack);
+      for (const entry of [...undoStack, ...redoStack]) {
+        for (const half of artworkHalvesOf(entry)) {
+          if (half.before.assetId) retainedAssetIds.add(half.before.assetId);
+          if (half.after.assetId) retainedAssetIds.add(half.after.assetId);
+        }
+      }
+      set({ undoStack, redoStack });
 
       // Permanent record deletion must not create an undoable project edit.
       if (openProject) {

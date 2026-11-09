@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ComponentProps } from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type {
@@ -303,6 +303,56 @@ const panelArtworks: Artwork[] = [
   artwork("unknown", "Untitled Study")
 ];
 
+describe("ChecklistPanel multi-select", () => {
+  const rowCheckbox = (title: string) =>
+    screen.getByRole("checkbox", { name: `Select ${title}` });
+
+  it("Space on a row checkbox toggles it without selecting the row", () => {
+    const onSelectArtwork = vi.fn();
+    renderChecklist({ panelProps: { onSelectArtwork } });
+    const box = rowCheckbox("Interior Study");
+    fireEvent.keyDown(box, { key: " " });
+    fireEvent.click(box);
+    expect(box).toHaveAttribute("aria-checked", "true");
+    expect(onSelectArtwork).not.toHaveBeenCalled();
+  });
+
+  it("shift-click checks the range between the anchor and the target", () => {
+    renderChecklist();
+    const titles = Array.from(
+      document.querySelectorAll<HTMLElement>(".checklist-row .checklist-title")
+    ).map((el) => el.textContent ?? "");
+    expect(titles.length).toBe(4);
+    fireEvent.click(rowCheckbox(titles[0]));
+    fireEvent.click(rowCheckbox(titles[2]), { shiftKey: true });
+    expect(rowCheckbox(titles[0])).toHaveAttribute("aria-checked", "true");
+    expect(rowCheckbox(titles[1])).toHaveAttribute("aria-checked", "true");
+    expect(rowCheckbox(titles[2])).toHaveAttribute("aria-checked", "true");
+    expect(rowCheckbox(titles[3])).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("replaces the filter tabs with the bulk bar while rows are checked, and Escape clears", () => {
+    renderChecklist();
+    expect(screen.getByRole("radiogroup", { name: "Filter checklist" })).toBeInTheDocument();
+    fireEvent.click(rowCheckbox("Interior Study"));
+    expect(screen.queryByRole("radiogroup", { name: "Filter checklist" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Duplicate" })).toBeInTheDocument();
+
+    fireEvent.keyDown(rowCheckbox("Interior Study"), { key: "Escape" });
+    expect(screen.getByRole("radiogroup", { name: "Filter checklist" })).toBeInTheDocument();
+  });
+
+  it("offers Duplicate in the row menu", async () => {
+    const onDuplicateArtworks = vi.fn();
+    renderChecklist({ panelProps: { onDuplicateArtworks } });
+    const trigger = screen.getByRole("button", { name: "More actions for Interior Study" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter", code: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Duplicate" }));
+    expect(onDuplicateArtworks).toHaveBeenCalledWith(["boyun-interior"]);
+  });
+});
+
 function artwork(
   id: string,
   title: string,
@@ -329,14 +379,18 @@ function ChecklistHarness({
   project,
   selectedArtworkId,
   libraryArtworks = panelArtworks,
-  onChangeChecklistView
+  onChangeChecklistView,
+  panelProps
 }: {
   project: Project;
   selectedArtworkId: string | null;
   libraryArtworks?: Artwork[];
   onChangeChecklistView?: (view: ChecklistViewPreferences) => void;
+  panelProps?: Partial<ComponentProps<typeof ChecklistPanel>>;
 }) {
   const [checklistView, setChecklistView] = useState(project.checklistView);
+  // Plays the parent's role for the controlled multi-select state.
+  const [checked, setChecked] = useState<Set<string>>(() => new Set());
   return (
     <TooltipProvider>
       <ChecklistPanel
@@ -358,6 +412,9 @@ function ChecklistHarness({
         pendingDuplicateUploads={[]}
         project={{ ...project, checklistView }}
         selectedArtworkId={selectedArtworkId}
+        checkedArtworkIds={checked}
+        onCheckedChange={setChecked}
+        {...panelProps}
       />
     </TooltipProvider>
   );
@@ -369,6 +426,7 @@ function renderChecklist(
     selectedArtworkId?: string | null;
     libraryArtworks?: Artwork[];
     onChangeChecklistView?: (view: ChecklistViewPreferences) => void;
+    panelProps?: Partial<ComponentProps<typeof ChecklistPanel>>;
   } = {}
 ) {
   const project = overrides.project ?? {
@@ -382,6 +440,7 @@ function renderChecklist(
       project={project}
       selectedArtworkId={overrides.selectedArtworkId ?? null}
       onChangeChecklistView={overrides.onChangeChecklistView}
+      panelProps={overrides.panelProps}
     />
   );
   return {
@@ -398,6 +457,7 @@ function renderChecklist(
           project={project}
           selectedArtworkId={selectedArtworkId}
           onChangeChecklistView={overrides.onChangeChecklistView}
+          panelProps={overrides.panelProps}
         />
       )
   };

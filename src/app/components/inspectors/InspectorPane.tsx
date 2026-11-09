@@ -91,6 +91,7 @@ import {
   useAppStore
 } from "../../store";
 import { getSelectedWall, getWallDimensionLink, getWallNames } from "../../projectWalls";
+import { CheckedWorksInspector } from "./CheckedWorksInspector";
 import { getArrangeEligibility } from "../../store/arrangeEligibility";
 
 type InspectorPaneProps = {
@@ -109,6 +110,9 @@ type InspectorPaneProps = {
   // "Use as North wall" raises a confirm only when the room carries typed wall
   // names — App owns that branch (it owns the dialog), so the inspector asks.
   requestSetNorthWall: (roomId: string, wallId: string) => void;
+  // Works checked in the library/checklist. While any are checked, their bulk
+  // editor replaces every other inspector body.
+  checkedWorks?: { artworkIds: string[]; onClear: () => void };
 };
 
 export function InspectorPane({
@@ -124,7 +128,8 @@ export function InspectorPane({
   setInspectorSectionOpen,
   toggleReshapeRoom,
   armDuplicatePartition,
-  requestSetNorthWall
+  requestSetNorthWall,
+  checkedWorks
 }: InspectorPaneProps) {
   const project = useAppStore((state) => state.project);
   const selection = useAppStore((state) => state.selection);
@@ -136,6 +141,8 @@ export function InspectorPane({
   const placementWarnings = useAppStore((state) => state.placementWarnings);
   const lastGeometryEdit = useAppStore((state) => state.lastGeometryEdit);
   const selectOpening = useAppStore((state) => state.selectOpening);
+  const setArtworkImage = useAppStore((state) => state.setArtworkImage);
+  const removeArtworkImage = useAppStore((state) => state.removeArtworkImage);
   const setObjectSelection = useAppStore((state) => state.setObjectSelection);
   const addReferenceMeasurement = useAppStore((state) => state.addReferenceMeasurement);
   const updateReferenceMeasurement = useAppStore((state) => state.updateReferenceMeasurement);
@@ -155,6 +162,8 @@ export function InspectorPane({
   const setPolygonWallLength = useAppStore((state) => state.setPolygonWallLength);
   const updateArtwork = useAppStore((state) => state.updateArtwork);
   const updateArtworksMatFrame = useAppStore((state) => state.updateArtworksMatFrame);
+  const updateArtworks = useAppStore((state) => state.updateArtworks);
+  const libraryArtworks = useAppStore((state) => state.libraryArtworks);
   const setArtworkPlacementForm = useAppStore((state) => state.setArtworkPlacementForm);
   const moveArtworkPlacement = useAppStore((state) => state.moveArtworkPlacement);
   const removePlacement = useAppStore((state) => state.removePlacement);
@@ -656,6 +665,36 @@ export function InspectorPane({
     return { ...warning, subject };
   });
 
+  if (checkedWorks && checkedWorks.artworkIds.length > 0) {
+    const checkedIds = [...new Set(checkedWorks.artworkIds)];
+    const checkedIdSet = new Set(checkedIds);
+    const checkedArtworks = libraryArtworks.filter((artwork) => checkedIdSet.has(artwork.id));
+    const checkedMatFrameTargets = checkedArtworks.filter(
+      (artwork) => artwork.frameIncludedInImage !== true
+    );
+    return (
+      <aside className="inspector" aria-label="Inspector">
+        <div className="inspector-zone">
+          <CheckedWorksInspector
+            artworks={checkedArtworks}
+            unit={project.unit}
+            onCommit={(changes) => updateArtworks(checkedIds, changes)}
+            matFrame={{
+              targetCount: checkedMatFrameTargets.length,
+              skippedCount: checkedArtworks.length - checkedMatFrameTargets.length,
+              currentValues: checkedMatFrameTargets.map(({ matWidthMm, frame }) => ({
+                matWidthMm,
+                frame
+              })),
+              onApply: (changes) => updateArtworksMatFrame(checkedIds, changes)
+            }}
+            onClear={checkedWorks.onClear}
+          />
+        </div>
+      </aside>
+    );
+  }
+
   return (
         <aside className="inspector" aria-label="Inspector">
           <div className="inspector-zone">
@@ -835,6 +874,8 @@ export function InspectorPane({
             ) : selectedArtwork ? (
               <ArtworkInspector
                 artwork={selectedArtwork}
+                onReplaceImage={(file) => void setArtworkImage(selectedArtwork.id, file)}
+                onRemoveImage={() => void removeArtworkImage(selectedArtwork.id)}
                 scopeNote={
                   viewMode === "library"
                     ? "Changes apply everywhere this artwork is used."

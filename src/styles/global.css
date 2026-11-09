@@ -9958,3 +9958,116 @@ button.import-conflict-headtext:hover .import-conflict-caret { color: var(--ink)
 .three-view.is-panning .viewport-zoom {
   cursor: default;
 }
+
+/* Checklist checkboxes + image menu */
+.checklist-check {
+  position: absolute;
+  top: var(--space-8);
+  left: var(--space-16);
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2);
+  background: var(--bg);
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+
+.checklist-row:hover .checklist-check,
+.checklist-check:focus-within,
+.checklist-check[data-visible] {
+  opacity: 1;
+}
+
+@media (pointer: coarse) {
+  .checklist-check {
+    left: var(--space-8);
+    opacity: 1;
+  }
+}
+
+.checklist-row[data-checked] {
+  background: color-mix(in oklch, var(--primary-soft) 55%, transparent);
+}
+
+.artwork-inspector-thumb-button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.artwork-inspector-add-image {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.artwork-inspector-add-image:hover {
+  background: var(--surface);
+}
+
+/* Artwork bulk bar + checklist editor */
+.artwork-bulk-bar {
+  display: flex;
+  min-height: 2.8rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-24);
+  border-top: 1px solid var(--border);
+  background: var(--primary-soft);
+  font-size: var(--type-sm);
+  animation: artwork-library-selection-in 150ms ease-out;
+}
+.artwork-bulk-bar[data-variant="compact"] {
+  min-height: 0;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-8);
+}
+.artwork-bulk-bar-count { margin-right: auto; font-weight: 600; }
+.artwork-bulk-bar-action { display: inline-flex; }
+.artwork-bulk-bar button.bg-primary { color: var(--primary-foreground); }
+.artwork-bulk-bar-confirm {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+.artwork-bulk-bar-confirm > span { margin-right: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .artwork-bulk-bar { animation: none; }
+}
+
+.artwork-library-table tr[data-active] { box-shadow: inset 2px 0 0 var(--primary); }
+.artwork-library-table .artwork-table-number { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.checklist-editor-view .artwork-library-header > div:first-child { display: flex; flex-direction: column; align-items: flex-start; }
+
+/* Checklist-scope table columns: select | # | Artwork | Artist | Date |
+   Dimensions | Status | Location. The library's 34% rule targets column 2,
+   which is the narrow row number here, so the Artwork column takes it. */
+.artwork-library-table[data-scope="checklist"] th:nth-child(2) { width: 3rem; }
+.artwork-library-table[data-scope="checklist"] th:nth-child(3) { width: 30%; }
+@media (max-width: 720px) {
+  .artwork-library-table[data-scope="checklist"] th:nth-child(4),
+  .artwork-library-table[data-scope="checklist"] td:nth-child(4) { display: table-cell; }
+  .artwork-library-table[data-scope="checklist"] th:nth-child(6),
+  .artwork-library-table[data-scope="checklist"] td:nth-child(6) { display: none; }
+}
+
+/* Bulk edit + new-work dialogs: same frame as the bulk mat & frame dialog
+   (24px inline padding so fields align with the title). */
+.bulk-edit-dialog,
+.new-artwork-dialog { width: min(28rem, calc(100vw - 2rem)); }
+.bulk-edit-fields { display: flex; flex-direction: column; gap: var(--space-14); padding: var(--space-14) var(--space-24) var(--space-20); }

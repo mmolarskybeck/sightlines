@@ -55,6 +55,9 @@ function dropboxShareDevRelay(): Plugin {
 }
 
 export default defineConfig({
+  // Concurrent dev servers with different env (the e2e storage server) need
+  // their own optimizer cache, or each re-optimize 504s the other's deps.
+  cacheDir: process.env.SIGHTLINES_VITE_CACHE_DIR || undefined,
   plugins: [react(), tailwindcss(), dropboxShareDevRelay()],
   resolve: {
     // stats-gl (via drei) nests its own three@0.170.0; force everything onto
