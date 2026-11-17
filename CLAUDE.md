@@ -23,6 +23,7 @@ Read the owning doc before changing an area, and update it when a shipped change
 | `docs/export-spec.md` | PNG/PDF/checklist export behavior, dimension-line rules, documented PDF-vs-SVG divergences (§16). | Export behavior changes. |
 | `docs/package-format.md` | `.sightlines` package format and import/merge rules. | The package manifest, tiers, or import behavior changes. |
 | `docs/cloud-sync-plan.md` | Cross-device sync design, conflict UX, staged roadmap (stages 1–2 shipped, 3–4 designed). | Sync behavior or the remaining stages change. |
+| `docs/dropbox-storage-plan.md` | Dropbox storage reduction plan: account-wide content-addressed blobs, storage manager, retention, share lifetime/quality; phase 1 measurements and protocol evidence. | A phase ships or a design decision there is made. |
 | `docs/cloud-backup-providers.md` | Dropbox scopes, rollout staging, production-approval gates, other providers' constraints. | Scopes, provider state, or rollout stage change. |
 | `docs/deployment.md` | Cloudflare Workers deploy, env baking, Vercel mirror, GitHub CI job, `main` branch protection, rollback. | Deploy mechanics, CI steps, or branch rules change. |
 | `docs/privacy-preserving-analytics.md` | Analytics policy contract and event allowlist. | Any new telemetry event — update allowlist and public disclosures before it ships. |

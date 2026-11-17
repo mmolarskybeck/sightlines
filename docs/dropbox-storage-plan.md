@@ -1,6 +1,7 @@
 # Dropbox storage and recovery plan
 
-Status: planning only; no implementation authorized by this document.
+Status: phase 1 (technical design and measurement) drafted 2026-11-09 for review —
+see "Phase 1 results" below. No product code has changed; phases 2–5 are not started.
 Created: 2026-11-09.
 
 This plan extends [Cloud Sync Plan](cloud-sync-plan.md) and
@@ -27,8 +28,9 @@ User preferences confirmed during planning:
 - Implementation is a later task. This document does not authorize cleanup of
   personal files, migration, or code changes.
 
-Still undecided: automatic backup count, whether history should span days/weeks,
-milestone behavior, and the default image quality for new shares.
+Settled 2026-11-09 (see "Decisions" under Phase 1 results): store, head format,
+no blob collection, and spaced retention. Still undecided: milestone behavior and the
+default image quality for new shares.
 
 ## Evidence from the supplied Dropbox export
 
@@ -299,6 +301,122 @@ before migration so users have visibility and a safe way to create headroom.
 Success means users can understand and reclaim space without guessing which
 working project to delete, while repeated project edits stop creating repeated
 stored image payloads. Exact capacity targets follow prototype measurements.
+
+## Phase 1 results (2026-11-09, for review)
+
+Prototypes, both read-only and stdlib Python, under `scripts/prototypes/`:
+
+- `measure-cloud-dedupe.py <export.zip> [--json out]` simulates a content-addressed
+  store over an App Folder export (hashes real tier bytes). Never commit its JSON.
+- `simulate-blob-protocol.py [--runs N]` checks publication/collection interleavings
+  against an in-memory model of Dropbox write semantics.
+
+### Measured on the supplied export
+
+| Scenario | Stored bytes |
+| --- | ---: |
+| Today (heads + backups + shares) | 2,126.0 MB |
+| Per-project blob namespace + manifests + self-contained shares | 608.5 MB |
+| **Account-wide blob store** + manifests + self-contained shares | **169.6 MB** |
+
+- Account-wide store: 735 blobs, 60.2 MB (373 display = 53.2 MB, 362 thumbnails =
+  7.0 MB). Thin manifests: median 90 KB deflated, 5.4 MB for all 68 versions.
+  Per-project namespacing keeps 8× more image bytes because of the fork clusters.
+- Steady-state upload per version: median **90 KB** (manifest only) vs 32.4 MB today.
+  54 of 67 later versions added no new blobs; the max was 169 (a new project).
+  Total upload over the export's history: 65.7 MB split vs 2,022 MB today.
+- Garbage: **0 bytes**. No blob was referenced only by older versions; images are
+  added far more often than removed. Blob collection is not needed to get the savings.
+- Recovery depth becomes nearly free: a thin version costs ~90 KB, so retention is a
+  question of history span and UI, not storage.
+- Migration with no cleanup needs 65.7 MB of uploads (largest single project 37.6 MB),
+  but the export leaves **21.5 MB** headroom against a 2 GiB quota (assumed; confirm
+  with `users/get_space_usage`). Migration cannot start on this account until phase 2
+  frees space. That confirms the phase 2 → 3 order.
+- Local reassembly of the largest package (402 blobs, 37.5 MB, hash-verified) took
+  0.02 s. Reconstruction cost is network requests, not CPU (below).
+
+### Proposed technical design
+
+1. **Account-wide blob store** at `/blobs/<sha256>`: flat, no extension; the mime
+   lives in the manifest. A reader derives the path only from a validated 64-hex
+   hash, never from a manifest path string, so references cannot leave the namespace.
+2. **Thin package = `.sightlines` package `schemaVersion: 2`**: the v1 manifest,
+   where each tier entry names its blob hash instead of an in-zip path, in a zip that
+   contains only `manifest.json`. Heads stay at `/projects/<id>/current.sightlines`,
+   which keeps one rev lineage and avoids two competing heads. Portable exports and
+   shares stay self-contained v1. Every reader accepts both versions.
+3. **Old clients.** There is no service worker, so a stale client is an open tab
+   from before the deploy. Its pull of a v2 head is refused as "newer than this app"
+   (existing version guard) and lands in the sync error state without replacing
+   anything. If that tab resolves a conflict with "Keep this device's version", it
+   writes a self-contained v1 head. That costs space but stays valid and readable.
+   Old clients never touch `/blobs` or `/recovery`. Rollout needs no extra gate;
+   recheck this if a service worker or installable build ever ships.
+4. **Recovery versions** at `/recovery/<full-project-id>/<ISO>.sightlines` (thin v2,
+   `add`, autorename off). Full id only; title and prefix are display aids. Legacy
+   `/backups/…` folders stay untouched until phase 2/3 cleanup says otherwise.
+5. **Publication order** (head or recovery version):
+   list `/blobs` (paged; a cache for this pass only) → upload missing blobs in
+   Dropbox upload-session batches (`finish_batch_v2`, ≤1000 per commit, `add`,
+   autorename off, `strict_conflict` false so identical bytes are a no-op and
+   different bytes are a conflict to investigate) → verify via the returned
+   `content_hash` → write the recovery version → write the head with the existing
+   rev-conditional update → **post-publish verify**: re-check every referenced blob;
+   restore it from `/trash` or re-upload it from local bytes. A device only
+   references tiers it holds locally, so re-upload is always possible.
+6. **Pull / open**: download the thin head, validate it, and resolve each tier from
+   a local-by-hash match, then `/blobs`, then `/trash`. Verify the SHA-256 of every
+   blob, assemble an in-memory v1-equivalent package, and hand it to the existing
+   import pipeline unchanged (replace-mode prerequisites included). Bounds: ≤4096
+   references, ≤256 MB total (`MAX_BACKUP_DOWNLOAD_BYTES`), per-blob ≤256 MB. A
+   missing or corrupt blob is "incomplete, try again" and never replaces local data.
+7. **Request cost.** A new device's first open is ~400 blob downloads (~37 MB): the
+   same bytes as today, many more requests. Phase 3 must measure it on a disposable
+   account with bounded parallelism (~4). Devices that already hold an image skip
+   it by hash; a persisted per-tier hash cache avoids rehashing the local library.
+8. **Blob collection is deferred** (measured garbage is zero). When it is built, it
+   must use the protocol the simulation validated: move unreferenced blobs older than
+   a grace period to `/trash/<sha256>`, then **re-read every root** (all heads and
+   recovery versions, fully paged; any listing failure aborts the run) before
+   permanent deletion, restoring anything newly referenced. Writers keep the
+   post-publish verify. No leases are needed. A collector must refuse to run if it
+   sees a root or manifest version it does not understand.
+
+### Failure-case evidence (`simulate-blob-protocol.py`, 20,000 runs per variant)
+
+Two devices publish three versions each (one device often stalls between its
+existence check and its publication), a collector runs three passes, and a reader
+pulls continuously.
+
+| Variant | Runs with violations | What fails |
+| --- | ---: | --- |
+| Full protocol | 0 | None. Readers sometimes wait and retry (transient, never accepted) |
+| No post-publish verify | 2,076 | Head permanently references a deleted blob |
+| No trash (direct delete) | 2,175 | Collector deletes using a stale reference scan |
+| Sweep reuses stale roots | 9,780 | Same as above, from trash |
+| Reader trusts head | 3,797 | Incomplete project accepted |
+
+This confirms the plan's warning that one reference scan is insufficient. It also
+shows the pieces are jointly necessary: trash plus fresh roots plus writer verify
+plus a checking reader.
+
+### Decisions
+
+Agreed 2026-11-09 (recorded in `docs/decisions.md`): account-wide store; thin v2
+heads at the existing path with the stale-tab behavior in item 3; phase 3 ships
+without blob collection.
+
+Retention (agreed 2026-11-09): spaced history per project — every recovery version
+from the last 24 hours (cap ~10), then the newest per day for 14 days, then the newest
+per week for 3 months (~36 versions, ~3 MB). An image removed from a project stays
+stored until the last retained version referencing it ages out (≤ ~3 months).
+User-pinned milestones are a later addition. Revisit the windows if measured usage
+still grows too fast.
+
+Still to recheck against current Dropbox docs at implementation time:
+`strict_conflict` semantics for `add`, batch-upload limits, `content_hash`
+algorithm, and the Basic-plan quota figure.
 
 ## External references to recheck before implementation
 
