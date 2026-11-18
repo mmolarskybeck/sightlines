@@ -95,6 +95,84 @@ export function toStandaloneArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return buffer;
 }
 
+// --- storage management (docs/dropbox-storage-plan.md phase 2) -------------
+
+// One file this app wrote, as the storage inventory reports it. `rev` lets a
+// later delete assert "still the file the preview showed" (null when the
+// provider gave none, in which case a delete is unconditional on content).
+export type StorageFile = {
+  path: string;
+  name: string;
+  sizeBytes: number;
+  serverModifiedIso: string | null;
+  rev: string | null;
+};
+
+// One backup folder: the unit retention prunes. A project can have more than
+// one (the pre-migration bare-id folder plus the titled one).
+export type StorageBackupFolder = {
+  path: string;
+  folderName: string;
+  // Newest first.
+  backups: StorageFile[];
+};
+
+// Everything stored for one project, grouped for display. Grouping by the
+// 8-char id prefix is a DISPLAY aid only: deletion always works on the
+// explicit file paths and revs listed here, never on the group.
+export type StorageProjectGroup = {
+  // Stable React/selection key: the full project id when known, otherwise
+  // "prefix:<id8>", otherwise "folder:<area>:<lowercased folder name>".
+  key: string;
+  // Full project id, known only from a sync head path or a bare-id folder.
+  projectId: string | null;
+  idPrefix: string;
+  // From the backup folder name, else the share folder name; null for a
+  // project that exists only as a sync head (the UI supplies a label).
+  title: string | null;
+  head: StorageFile | null;
+  backupFolders: StorageBackupFolder[];
+  // Newest first.
+  shares: StorageFile[];
+};
+
+export type StorageUsage = {
+  usedBytes: number;
+  // null when the account reports no individual/team allocation.
+  allocatedBytes: number | null;
+};
+
+export type StorageInventory = {
+  groups: StorageProjectGroup[];
+  // Files under the app folder in no shape this app writes. Counted, never
+  // offered for deletion.
+  otherFiles: StorageFile[];
+  // null when the usage request failed; the inventory is still usable.
+  usage: StorageUsage | null;
+  listedAtIso: string;
+};
+
+// Account-wide storage preferences, stored in the provider so every device
+// agrees. Absent file = defaults.
+export type StorageSettings = {
+  backupsPerProject: number;
+};
+
+export type StorageDeleteOutcome =
+  | "deleted"
+  // Already gone — the goal state, reported separately for honesty.
+  | "gone"
+  // The file's rev no longer matches the preview; left alone.
+  | "changed"
+  | "failed";
+
+export type StorageDeleteResult = {
+  path: string;
+  outcome: StorageDeleteOutcome;
+  // Set for "failed".
+  errorKind?: CloudErrorKind;
+};
+
 export interface CloudBackupProvider {
   // Stable machine id (e.g. "dropbox") and a human label ("Dropbox").
   readonly id: string;
@@ -197,4 +275,25 @@ export interface CloudBackupProvider {
   // device-handoff rows. An empty list means no project has ever been synced
   // (the sync location does not exist yet), not that listing failed.
   listSyncHeads(): Promise<SyncHeadListing[]>;
+
+  // --- storage management ----------------------------------------------------
+
+  // One listing of everything this app stored, grouped by project, plus the
+  // account's space usage (best-effort: usage null if that request fails).
+  // Scope-gated like the read side.
+  getStorageInventory(): Promise<StorageInventory>;
+
+  // Delete specific backup or share files. MUST refuse (throw before any
+  // request) a path outside /backups/<folder>/<file>.sightlines or
+  // /shares/<folder>/<file>.sightlines, so a sync head can never be removed
+  // through this method. Sequential, per-file results; never throws for a
+  // single file's failure.
+  deleteStorageFiles(
+    files: Array<{ path: string; rev: string | null }>
+  ): Promise<StorageDeleteResult[]>;
+
+  // Account-wide storage settings; null when none were ever saved (or the
+  // stored file is unreadable/invalid — callers then use defaults).
+  readStorageSettings(): Promise<StorageSettings | null>;
+  writeStorageSettings(settings: StorageSettings): Promise<void>;
 }

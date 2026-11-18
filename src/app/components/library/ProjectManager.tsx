@@ -23,6 +23,7 @@ import type {
 import type { CloudProjectsStatus } from "../../store/cloudProjectsSlice";
 import { pluralize } from "../shared/pluralize";
 import { Button } from "../ui/button";
+import { CloudStorageDialog } from "./CloudStorageDialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
@@ -89,6 +90,7 @@ export function ProjectManager({
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const [storageOpen, setStorageOpen] = useState(false);
 
   // Disconnected users see nothing new here — Settings owns connecting. A grant
   // that needs reauthorization still shows the section, because that state has
@@ -435,11 +437,18 @@ export function ProjectManager({
             openingRowKey={cloudProjectOpening}
             providerStatus={cloudBackupProviderStatus}
             status={cloudProjectsStatus}
+            onManageStorage={() => setStorageOpen(true)}
             onOpenRow={handleOpenCloudRow}
             onReconnect={onReconnectCloudBackup}
             onRetry={onRefreshCloudProjects}
           />
         ) : null}
+
+        <CloudStorageDialog
+          localProjects={summaries?.map((summary) => ({ id: summary.id, title: summary.title })) ?? null}
+          open={storageOpen}
+          onOpenChange={setStorageOpen}
+        />
       </DialogContent>
     </Dialog>
   );
@@ -461,6 +470,7 @@ function CloudProjectsSection({
   openingRowKey,
   providerStatus,
   status,
+  onManageStorage,
   onOpenRow,
   onReconnect,
   onRetry
@@ -472,6 +482,7 @@ function CloudProjectsSection({
   openingRowKey: string | null;
   providerStatus: CloudBackupProviderStatus;
   status: CloudProjectsStatus;
+  onManageStorage: () => void;
   onOpenRow: (row: CloudProjectRow) => Promise<void>;
   onReconnect: () => Promise<void>;
   onRetry: () => Promise<void>;
@@ -493,7 +504,19 @@ function CloudProjectsSection({
           second row is the scroll region, so a third child would take it and
           the heading would scroll away with the rows. */}
       <div className="project-manager-cloud-header">
-        <h3 className="project-manager-cloud-heading">{section.heading}</h3>
+        <div className="project-manager-cloud-heading-row">
+          <h3 className="project-manager-cloud-heading">{section.heading}</h3>
+          {providerStatus === "connected" ? (
+            <Button
+              className="project-manager-cloud-inline-action"
+              size="sm"
+              variant="ghost"
+              onClick={onManageStorage}
+            >
+              Manage storage
+            </Button>
+          ) : null}
+        </div>
         {/* Above the rows, not inside them: what failed is the section's
             knowledge of syncing, and every row below is affected by it. */}
         {headsUnavailable ? (

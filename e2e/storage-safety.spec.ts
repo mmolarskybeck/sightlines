@@ -979,3 +979,126 @@ test.describe("save failure", () => {
     await expect(page.locator("button.status-badge")).toHaveText(/Saved/);
   });
 });
+
+// Dropbox storage manager (docs/dropbox-storage-plan.md phase 2): the
+// inventory preview, a keep-N trim that deletes ONLY the previewed old
+// backups (rev-conditional), saves the account-wide limit, and never touches
+// the synced copy or a shared snapshot.
+test.describe("Dropbox storage manager", () => {
+  const HEAD_ID = "aaaaaaaa-1111-4222-8333-444444444444";
+  const FOLDER = "/backups/Show A — aaaaaaaa";
+  const MB = 1_000_000;
+
+  function file(path: string, size: number, modified: string, rev: string) {
+    return {
+      ".tag": "file",
+      name: path.slice(path.lastIndexOf("/") + 1),
+      path_lower: path.toLowerCase(),
+      path_display: path,
+      size,
+      server_modified: modified,
+      rev
+    };
+  }
+
+  test("previews and trims old backups without touching the synced copy or shares", async ({
+    page,
+    consoleGuard
+  }) => {
+    // No account setting saved yet: the settings download answers not_found.
+    consoleGuard.allow(/Failed to load resource.*409/);
+    const backups = [1, 2, 3, 4].map((day) =>
+      file(
+        `${FOLDER}/Show A 2026-11-0${day}T10-00-00-000Z.sightlines`,
+        32 * MB,
+        `2026-11-0${day}T10:00:00Z`,
+        `rev-backup-${day}`
+      )
+    );
+    const head = file(`/projects/${HEAD_ID}/current.sightlines`, 30 * MB, "2026-11-05T10:00:00Z", "rev-head");
+    const share = file(
+      "/shares/Show A — aaaaaaaa/Show A 2026-10-01T10-00-00-000Z.sightlines",
+      35 * MB,
+      "2026-10-01T10:00:00Z",
+      "rev-share"
+    );
+    let remaining = [head, share, ...backups];
+    const deleteBodies: Array<{ path: string; parent_rev?: string }> = [];
+    let savedSettings: unknown = null;
+
+    await installDropboxRoutes(page);
+    // Registered after installDropboxRoutes, so these win for their URLs.
+    await page.route("https://api.dropboxapi.com/2/files/list_folder", async (route) => {
+      const { path } = route.request().postDataJSON() as { path: string };
+      const entries = remaining.filter((entry) =>
+        path === "" ? true : entry.path_lower.startsWith(`${path.toLowerCase()}/`)
+      );
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ entries, has_more: false, cursor: "" })
+      });
+    });
+    await page.route("https://api.dropboxapi.com/2/users/get_space_usage", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          used: 1_900_000_000,
+          allocation: { ".tag": "individual", allocated: 2_147_483_648 }
+        })
+      })
+    );
+    await page.route("https://api.dropboxapi.com/2/files/delete_v2", async (route) => {
+      const body = route.request().postDataJSON() as { path: string; parent_rev?: string };
+      deleteBodies.push(body);
+      remaining = remaining.filter((entry) => entry.path_lower !== body.path.toLowerCase());
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+    await page.route("https://content.dropboxapi.com/2/files/download", (route) =>
+      route.fulfill({ status: 409, contentType: "text/plain", body: "path/not_found/" })
+    );
+    await page.route("https://content.dropboxapi.com/2/files/upload", async (route) => {
+      const apiArg = JSON.parse(route.request().headers()["dropbox-api-arg"] ?? "{}");
+      if (apiArg.path === "/settings/storage.json") {
+        expect(apiArg.mode).toBe("overwrite");
+        savedSettings = JSON.parse(route.request().postDataBuffer()?.toString("utf8") ?? "null");
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ path_display: apiArg.path, rev: "rev-new" })
+      });
+    });
+    await seedDropboxAuth(page);
+    await gotoApp(page);
+
+    await page.getByRole("button", { name: "Manage projects" }).click();
+    await page.getByRole("button", { name: "Manage storage" }).click();
+    const dialog = page.getByRole("dialog", { name: "Dropbox storage" });
+
+    await expect(dialog.getByText("1.90 GB of 2.15 GB used")).toBeVisible();
+    const rows = dialog.getByRole("list", { name: "Stored projects" });
+    await expect(rows.getByText("Show A", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Every project is within this limit.")).toBeVisible();
+
+    await dialog.getByRole("combobox", { name: "Backups to keep per project" }).click();
+    await page.getByRole("option", { name: "Newest 2 backups" }).click();
+    await expect(dialog.getByText(/Removes 2 older backups from 1 project folder, about 64\.0 MB/)).toBeVisible();
+
+    await dialog.getByRole("button", { name: "Remove 2 older backups" }).click();
+    await expect(dialog.getByRole("status").filter({ hasText: "Removed 2 backups (64.0 MB)." })).toBeVisible();
+
+    // Exactly the two oldest backups, each conditional on the previewed rev.
+    expect(deleteBodies).toHaveLength(2);
+    expect(deleteBodies).toEqual(
+      expect.arrayContaining([
+        { path: backups[0].path_display, parent_rev: "rev-backup-1" },
+        { path: backups[1].path_display, parent_rev: "rev-backup-2" }
+      ])
+    );
+    expect(savedSettings).toMatchObject({ version: 1, backupsPerProject: 2 });
+    // The refreshed inventory now sits within the saved limit.
+    await expect(dialog.getByText("Every project is within this limit.")).toBeVisible();
+  });
+});

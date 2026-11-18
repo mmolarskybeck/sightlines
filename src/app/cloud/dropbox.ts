@@ -11,6 +11,10 @@ import {
   type CloudBackupProviderStatus,
   type CloudProjectBackup,
   type CloudProjectFolder,
+  type StorageDeleteResult,
+  type StorageInventory,
+  type StorageSettings,
+  type StorageUsage,
   type SyncHeadListing,
   type SyncHeadMetadata,
   type UploadBackupInput
@@ -50,6 +54,15 @@ import {
   type DropboxAuthRecord,
   type DropboxFileEntry
 } from "./dropboxAuth";
+import {
+  buildStorageInventory,
+  isDeletableStoragePath,
+  parseSpaceUsage,
+  parseStorageSettings,
+  serializeStorageSettings,
+  STORAGE_SETTINGS_PATH
+} from "./dropboxInventory";
+import { DEFAULT_BACKUPS_PER_PROJECT, isValidBackupsPerProject } from "./storagePlan";
 
 // Re-exported for callers (and this module's own test) that reach it through
 // the Dropbox provider file rather than the provider seam directly.
@@ -115,7 +128,7 @@ type TokenResponse = {
 // revision-conditional update with autorename OFF, so a stale base fails
 // loudly instead of forking the canonical file.
 type DropboxUploadCommit = {
-  mode: "add" | { ".tag": "update"; update: string };
+  mode: "add" | "overwrite" | { ".tag": "update"; update: string };
   autorename: boolean;
   mute: boolean;
   strict_conflict?: boolean;
@@ -346,7 +359,8 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
     // Retention runs AFTER a confirmed upload and is best-effort: a prune
     // failure must not fail the backup (it retries next cycle).
     try {
-      await this.pruneRetention(token, folderPath);
+      const keep = await this.backupsPerProjectForPrune(token);
+      await this.pruneRetention(token, folderPath, keep);
     } catch (error) {
       console.warn("Cloud backup uploaded; pruning old copies failed", error);
     }
@@ -523,6 +537,156 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
       });
       return collectSyncHeads(entries);
     });
+  }
+
+  // --- storage management ---------------------------------------------------
+
+  async getStorageInventory(): Promise<StorageInventory> {
+    this.requireReadScope(STORAGE_SCOPE_PURPOSE);
+    return this.withReauthTracking(async () => {
+      const token = await this.accessToken();
+      const entries = await this.listFolder(token, "", {
+        recursive: true,
+        action: "list Dropbox storage"
+      });
+      let usage: StorageUsage | null = null;
+      try {
+        usage = parseSpaceUsage(
+          await postJson<unknown>(
+            token,
+            "/2/users/get_space_usage",
+            null,
+            "read Dropbox space usage"
+          )
+        );
+      } catch {
+        usage = null; // best-effort: the inventory stays usable without it
+      }
+      return buildStorageInventory(entries, usage, new Date().toISOString());
+    });
+  }
+
+  async deleteStorageFiles(
+    files: Array<{ path: string; rev: string | null }>
+  ): Promise<StorageDeleteResult[]> {
+    for (const file of files) {
+      if (!isDeletableStoragePath(file.path)) {
+        throw new Error(
+          `Refusing to delete ${file.path}: not a backup or shared snapshot.`
+        );
+      }
+    }
+    if (files.length === 0) return [];
+    return this.withReauthTracking(async () => {
+      const token = await this.accessToken();
+      const results: StorageDeleteResult[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        let response: Response;
+        try {
+          response = await fetch(`${DROPBOX_API_URL}/2/files/delete_v2`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(
+              file.rev ? { path: file.path, parent_rev: file.rev } : { path: file.path }
+            )
+          });
+        } catch {
+          results.push({ path: file.path, outcome: "failed", errorKind: "transient" });
+          continue;
+        }
+        if (response.ok) {
+          results.push({ path: file.path, outcome: "deleted" });
+          continue;
+        }
+        const body = await response.json().catch(() => null);
+        const kind = classifyApiError(response.status, body);
+        if (kind === "not-found") {
+          results.push({ path: file.path, outcome: "gone" });
+        } else if (kind === "conflict") {
+          results.push(
+            file.rev
+              ? { path: file.path, outcome: "changed" }
+              : { path: file.path, outcome: "failed", errorKind: "conflict" }
+          );
+        } else if (response.status === 409 && file.rev) {
+          results.push({ path: file.path, outcome: "changed" });
+        } else if (kind === "reauth") {
+          this.reauthorizationRequired = true;
+          for (const rest of files.slice(i)) {
+            results.push({ path: rest.path, outcome: "failed", errorKind: "reauth" });
+          }
+          break;
+        } else {
+          results.push({ path: file.path, outcome: "failed", errorKind: kind });
+        }
+      }
+      return results;
+    });
+  }
+
+  async readStorageSettings(): Promise<StorageSettings | null> {
+    this.requireReadScope(STORAGE_SCOPE_PURPOSE);
+    return this.withReauthTracking(async () => {
+      const token = await this.accessToken();
+      const text = await this.downloadText(token, STORAGE_SETTINGS_PATH);
+      return text === null ? null : parseStorageSettings(text);
+    });
+  }
+
+  async writeStorageSettings(settings: StorageSettings): Promise<void> {
+    if (!isValidBackupsPerProject(settings.backupsPerProject)) {
+      throw new RangeError("backupsPerProject out of range");
+    }
+    await this.withReauthTracking(async () => {
+      const token = await this.accessToken();
+      await this.uploadSingle(
+        token,
+        STORAGE_SETTINGS_PATH,
+        new TextEncoder().encode(
+          serializeStorageSettings(settings, new Date().toISOString())
+        ),
+        { mode: "overwrite", autorename: false, mute: true }
+      );
+    });
+  }
+
+  private async downloadText(token: string, path: string): Promise<string | null> {
+    const response = await fetch(`${DROPBOX_CONTENT_URL}/2/files/download`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Dropbox-API-Arg": serializeDropboxApiArg({ path })
+      }
+    });
+    let bytes: Uint8Array;
+    try {
+      bytes = await ensureOkBinary(response, "read storage settings");
+    } catch (e) {
+      if (e instanceof CloudBackupError && e.kind === "not-found") return null;
+      throw e;
+    }
+    return new TextDecoder().decode(bytes);
+  }
+
+  // Fails SAFE: any problem reading the account setting (old grant without the
+  // read scope, missing file, network) prunes with the built-in default, which
+  // only ever keeps more, never fewer.
+  private async backupsPerProjectForPrune(token: string): Promise<number> {
+    const auth = readAuth();
+    if (!auth || !grantedScopes(auth).has("files.content.read")) return DEFAULT_BACKUPS_PER_PROJECT;
+    try {
+      const text = await this.downloadText(token, STORAGE_SETTINGS_PATH);
+      const settings = text === null ? null : parseStorageSettings(text);
+      return settings && isValidBackupsPerProject(settings.backupsPerProject)
+        ? settings.backupsPerProject
+        : DEFAULT_BACKUPS_PER_PROJECT;
+    } catch {
+      return DEFAULT_BACKUPS_PER_PROJECT;
+    }
   }
 
   remotePathFor(projectId: string): string {
@@ -756,9 +920,13 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
     return desiredPath;
   }
 
-  private async pruneRetention(token: string, folderPath: string): Promise<void> {
+  private async pruneRetention(
+    token: string,
+    folderPath: string,
+    keep: number
+  ): Promise<void> {
     const entries = await this.listFolder(token, folderPath);
-    const toDelete = selectBackupsToPrune(entries);
+    const toDelete = selectBackupsToPrune(entries, keep);
     for (const path of toDelete) {
       // A prune delete failing (e.g. already gone) doesn't matter — swallow,
       // and keep pruning the rest.
@@ -803,6 +971,7 @@ export class DropboxCloudBackupProvider implements CloudBackupProvider {
 // The reconnect reason shown when a stored grant predates the read scope and
 // the user asked for sync rather than for the backup browser.
 const SYNC_READ_SCOPE_PURPOSE = "sync projects across devices";
+const STORAGE_SCOPE_PURPOSE = "manage Dropbox storage";
 
 // Reject with a classified CloudBackupError on a non-2xx response; otherwise
 // return the parsed JSON body. 429s carry Retry-After through the message.

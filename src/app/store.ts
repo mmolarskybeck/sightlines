@@ -114,6 +114,12 @@ import {
   type CloudProjectsSliceState
 } from "./store/cloudProjectsSlice";
 import {
+  CLOUD_STORAGE_SLICE_INITIAL,
+  createCloudStorageSlice,
+  type CloudStorageSliceActions,
+  type CloudStorageSliceState
+} from "./store/cloudStorageSlice";
+import {
   CLOUD_SYNC_SLICE_INITIAL,
   createCloudSyncSlice,
   createSyncEpoch,
@@ -201,6 +207,8 @@ export type AppState = ArrangeSliceState &
   CloudBackupSliceActions &
   CloudProjectsSliceState &
   CloudProjectsSliceActions &
+  CloudStorageSliceState &
+  CloudStorageSliceActions &
   CloudSyncSliceState &
   CloudSyncSliceActions &
   DocumentMetaSliceActions &
@@ -1186,6 +1194,8 @@ export function createAppStore(deps: AppStoreDeps) {
 
     const cloudProjectsSlice = createCloudProjectsSlice(set, get, { deps });
 
+    const cloudStorageSlice = createCloudStorageSlice(set, get, { deps });
+
     const cloudSyncSlice = createCloudSyncSlice(set, get, { deps, syncEpoch });
 
     const artworkIntake = createArtworkIntakeSlice(set, get, {
@@ -1223,6 +1233,7 @@ export function createAppStore(deps: AppStoreDeps) {
       ...ARTWORK_INTAKE_SLICE_INITIAL,
       ...CLOUD_BACKUP_SLICE_INITIAL,
       ...CLOUD_PROJECTS_SLICE_INITIAL,
+      ...CLOUD_STORAGE_SLICE_INITIAL,
       ...CLOUD_SYNC_SLICE_INITIAL,
       pendingPackageImport: null,
       recoveryOffer: null,
@@ -1471,6 +1482,7 @@ export function createAppStore(deps: AppStoreDeps) {
       ...cloudBackupSlice.actions,
 
       ...cloudProjectsSlice.actions,
+      ...cloudStorageSlice.actions,
 
       ...cloudSyncSlice.actions,
 

@@ -18,7 +18,22 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install chromium webkit --with-deps
+      # Browser binaries are cached per Playwright version (a version bump is
+      # a cache miss and a fresh download). The system packages they need come
+      # from apt and can't be cached here, so a cache hit still installs those.
+      - name: Read Playwright version
+        id: playwright-version
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-chromium-webkit
+      - if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install chromium webkit --with-deps
+      - if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium webkit
       - run: npm run check
       # Source integrity. The pre-commit hook catches raw NUL bytes earlier, but
       # it needs `npm run hooks:install` per clone and `--no-verify` skips it, so

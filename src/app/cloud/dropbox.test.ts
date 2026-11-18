@@ -1227,4 +1227,184 @@ describe("DropboxCloudBackupProvider", () => {
       expect(readStoredAuth()).toBeNull();
     });
   });
+
+  describe("storage management", () => {
+    const ID = "1234abcd-0000-4000-8000-000000000000";
+    const textResponse = (status: number, text: string) => new Response(text, { status });
+    const bodyOf = (init?: RequestInit) => JSON.parse(String(init?.body));
+    const settingsText = (n: number) => JSON.stringify({ version: 1, backupsPerProject: n });
+
+    it("lists the root recursively, follows has_more, reads usage, and groups", async () => {
+      seedAuth();
+      const listBodies: unknown[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (url.endsWith("/files/list_folder")) {
+            listBodies.push(bodyOf(init));
+            return jsonResponse(200, {
+              entries: [{ ".tag": "file", name: "current.sightlines", path_display: `/projects/${ID}/current.sightlines`, path_lower: `/projects/${ID}/current.sightlines`, size: 9, rev: "r1" }],
+              has_more: true,
+              cursor: "C1"
+            });
+          }
+          if (url.includes("/files/list_folder/continue")) {
+            return jsonResponse(200, {
+              entries: [{ ".tag": "file", name: "a.sightlines", path_display: "/backups/Show — 1234abcd/a.sightlines", path_lower: "/backups/show — 1234abcd/a.sightlines", size: 4 }],
+              has_more: false,
+              cursor: "C2"
+            });
+          }
+          if (url.includes("/users/get_space_usage")) {
+            return jsonResponse(200, { used: 100, allocation: { ".tag": "individual", allocated: 1000 } });
+          }
+          return jsonResponse(200, {});
+        })
+      );
+      const inv = await makeProvider().getStorageInventory();
+      expect(listBodies).toEqual([{ path: "", recursive: true }]);
+      expect(inv.usage).toEqual({ usedBytes: 100, allocatedBytes: 1000 });
+      expect(inv.groups).toHaveLength(1);
+      expect(inv.groups[0].title).toBe("Show");
+      expect(inv.groups[0].backupFolders[0].backups).toHaveLength(1);
+    });
+
+    it("still resolves with usage null when get_space_usage fails", async () => {
+      seedAuth();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          if (url.includes("/users/get_space_usage")) return jsonResponse(500, { error: "boom" });
+          return jsonResponse(200, { entries: [], has_more: false, cursor: "" });
+        })
+      );
+      const inv = await makeProvider().getStorageInventory();
+      expect(inv.usage).toBeNull();
+    });
+
+    it("rejects with reauth, without fetching, when the grant lacks the read scope", async () => {
+      seedAuth({ scope: LEGACY_SCOPES });
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      await expect(makeProvider().getStorageInventory()).rejects.toMatchObject({ kind: "reauth" });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses to delete a sync head and makes no request", async () => {
+      seedAuth();
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      await expect(
+        makeProvider().deleteStorageFiles([{ path: `/projects/${ID}/current.sightlines`, rev: "r" }])
+      ).rejects.toThrow(/Refusing to delete/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("sends parent_rev only when a rev is given and maps outcomes", async () => {
+      seedAuth();
+      const bodies: Record<string, unknown> = {};
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string, init?: RequestInit) => {
+          const body = bodyOf(init);
+          bodies[body.path] = body;
+          if (body.path.endsWith("ok.sightlines")) return jsonResponse(200, {});
+          if (body.path.endsWith("gone.sightlines")) return jsonResponse(409, { error_summary: "path_lookup/not_found/" });
+          if (body.path.endsWith("changed.sightlines")) return jsonResponse(409, { error_summary: "path_write/conflict/file/" });
+          return jsonResponse(500, { error: "boom" });
+        })
+      );
+      const results = await makeProvider().deleteStorageFiles([
+        { path: "/backups/F/ok.sightlines", rev: null },
+        { path: "/backups/F/gone.sightlines", rev: "r2" },
+        { path: "/backups/F/changed.sightlines", rev: "r3" },
+        { path: "/shares/F/bad.sightlines", rev: null }
+      ]);
+      expect(bodies["/backups/F/ok.sightlines"]).toEqual({ path: "/backups/F/ok.sightlines" });
+      expect(bodies["/backups/F/gone.sightlines"]).toEqual({ path: "/backups/F/gone.sightlines", parent_rev: "r2" });
+      expect(results.map((r) => r.outcome)).toEqual(["deleted", "gone", "changed", "failed"]);
+      expect(results[3].errorKind).toBe("transient");
+    });
+
+    it("stops after a 401 and marks the remaining files failed/reauth", async () => {
+      seedAuth();
+      const fetchMock = vi.fn(async () => jsonResponse(401, { error: { ".tag": "expired_access_token" } }));
+      vi.stubGlobal("fetch", fetchMock);
+      const results = await makeProvider().deleteStorageFiles([
+        { path: "/backups/F/a.sightlines", rev: null },
+        { path: "/backups/F/b.sightlines", rev: null },
+        { path: "/backups/F/c.sightlines", rev: null }
+      ]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(results).toHaveLength(3);
+      for (const r of results) expect(r).toMatchObject({ outcome: "failed", errorKind: "reauth" });
+    });
+
+    it("reads settings: not_found -> null, valid -> settings, invalid -> null", async () => {
+      seedAuth();
+      vi.stubGlobal("fetch", vi.fn(async () => textResponse(409, "path/not_found/..")));
+      expect(await makeProvider().readStorageSettings()).toBeNull();
+      vi.stubGlobal("fetch", vi.fn(async () => textResponse(200, settingsText(3))));
+      expect(await makeProvider().readStorageSettings()).toEqual({ backupsPerProject: 3 });
+      vi.stubGlobal("fetch", vi.fn(async () => textResponse(200, "{not json")));
+      expect(await makeProvider().readStorageSettings()).toBeNull();
+    });
+
+    it("writes settings with overwrite and no autorename; rejects out-of-range", async () => {
+      seedAuth();
+      const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => jsonResponse(200, {}));
+      vi.stubGlobal("fetch", fetchMock);
+      const provider = makeProvider();
+      await provider.writeStorageSettings({ backupsPerProject: 2 });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toContain("/2/files/upload");
+      const arg = JSON.parse(String((init?.headers as Record<string, string>)["Dropbox-API-Arg"]));
+      expect(arg).toMatchObject({ path: "/settings/storage.json", mode: "overwrite", autorename: false });
+      fetchMock.mockClear();
+      await expect(provider.writeStorageSettings({ backupsPerProject: 0 })).rejects.toThrow(RangeError);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    describe("upload-time pruning honors the setting", () => {
+      function pruneMock(settings: () => Response, deletes: string[]) {
+        return vi.fn(async (url: string, init?: RequestInit) => {
+          if (url.includes("/files/download")) return settings();
+          if (url.includes("/files/upload")) return jsonResponse(200, {});
+          if (url.endsWith("/files/list_folder")) {
+            return jsonResponse(200, {
+              entries: Array.from({ length: 4 }, (_, i) => ({
+                ".tag": "file",
+                name: `b${i}.sightlines`,
+                path_lower: `/backups/proj-1/b${i}.sightlines`,
+                server_modified: `2026-07-0${i + 1}T00:00:00Z`
+              })),
+              has_more: false
+            });
+          }
+          if (url.includes("/files/delete_v2")) {
+            deletes.push(bodyOf(init).path);
+            return jsonResponse(200, {});
+          }
+          return jsonResponse(200, {});
+        });
+      }
+
+      it("keeps 2 when the stored setting is 2", async () => {
+        seedAuth();
+        const deletes: string[] = [];
+        vi.stubGlobal("fetch", pruneMock(() => textResponse(200, settingsText(2)), deletes));
+        await makeProvider().uploadBackup(smallBackupInput());
+        expect(deletes).toHaveLength(2);
+      });
+
+      it("falls back to 5 when the settings download fails", async () => {
+        seedAuth();
+        const deletes: string[] = [];
+        vi.stubGlobal("fetch", pruneMock(() => textResponse(500, "boom"), deletes));
+        await makeProvider().uploadBackup(smallBackupInput());
+        expect(deletes).toHaveLength(0);
+      });
+    });
+  });
 });
