@@ -237,6 +237,18 @@ describe("ProjectManager cloud projects", () => {
     expect(screen.queryByText("In Dropbox")).not.toBeInTheDocument();
   });
 
+  it("offers Manage storage only while connected, and opens the storage dialog", async () => {
+    renderWithCloud({ cloudBackupProviderStatus: "reauthorization-required" });
+    await screen.findByText("Summer Rotation");
+    expect(screen.queryByRole("button", { name: "Manage storage" })).not.toBeInTheDocument();
+
+    cleanup();
+    renderWithCloud();
+    await screen.findByText("Summer Rotation");
+    fireEvent.click(screen.getByRole("button", { name: "Manage storage" }));
+    expect(await screen.findByRole("dialog", { name: "Dropbox storage" })).toBeInTheDocument();
+  });
+
   it("lists each cloud folder with its backup meta and refreshes on open", async () => {
     const { onRefreshCloudProjects } = renderWithCloud();
 

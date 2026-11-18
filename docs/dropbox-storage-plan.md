@@ -1,7 +1,7 @@
 # Dropbox storage and recovery plan
 
-Status: phase 1 (technical design and measurement) drafted 2026-11-09 for review —
-see "Phase 1 results" below. No product code has changed; phases 2–5 are not started.
+Status: phase 1 (technical design and measurement) agreed 2026-11-09 — see "Phase 1
+results" below. Phase 2 built 2026-11-17 — see "Phase 2 as built". Phases 3–5 are not started.
 Created: 2026-11-09.
 
 This plan extends [Cloud Sync Plan](cloud-sync-plan.md) and
@@ -417,6 +417,30 @@ still grows too fast.
 Still to recheck against current Dropbox docs at implementation time:
 `strict_conflict` semantics for `add`, batch-upload limits, `content_hash`
 algorithm, and the Basic-plan quota figure.
+
+## Phase 2 as built (2026-11-17)
+
+- Entry: "Manage storage" in the project manager's "Projects in Dropbox" header
+  opens `CloudStorageDialog` (USER DECISION: project manager, not Settings).
+- Inventory: one recursive `list_folder` of the App Folder root plus
+  `users/get_space_usage` (best-effort), grouped by `dropboxInventory.ts`. Groups
+  join on the full id from a head or bare-id folder, else on the 8-char prefix
+  only when exactly one head matches; grouping is display-only.
+- Retention (USER DECISION): an account-wide "backups per project" setting at
+  `/settings/storage.json` (`{version:1, backupsPerProject}`, 1–5, offered as
+  1/2/3/5, default 5). Upload-time pruning reads it and falls back to 5 on any
+  failure, so a failure only ever keeps more: the ceiling equals the fallback
+  (5) for exactly that reason. Old clients keep pruning to 5.
+- Trim: `planBackupTrim` keeps the newest N per backup folder (never per group).
+  Applying it saves the setting first, re-lists, deletes only files in both the
+  preview and the fresh plan (path + rev), and uses `delete_v2` with
+  `parent_rev`. It reports removed / changed / failed and refreshes usage.
+- Shares are removed one at a time after an inline confirm.
+  `deleteStorageFiles` refuses any path outside `/backups/*/*.sightlines` and
+  `/shares/*/*.sightlines`.
+- Not built: deliberate whole-project cloud removal (it needs a verified archive
+  first), shared-link metadata (`sharing.read`), and the quota-full flow beyond
+  "deletes do not need space".
 
 ## External references to recheck before implementation
 

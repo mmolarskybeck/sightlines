@@ -52,6 +52,16 @@ export function makeFakeCloudBackupProvider(
     async listSyncHeads() {
       return [];
     },
+    async getStorageInventory() {
+      return { groups: [], otherFiles: [], usage: null, listedAtIso: "2026-01-01T00:00:00.000Z" };
+    },
+    async deleteStorageFiles(files) {
+      return files.map((file) => ({ path: file.path, outcome: "deleted" as const }));
+    },
+    async readStorageSettings() {
+      return null;
+    },
+    async writeStorageSettings() {},
     ...overrides
   };
 }
