@@ -551,6 +551,15 @@ export function SelectionInspector({
 // the frame is only ever created with a real width.
 const DEFAULT_FRAME_WIDTH_MM = 25.4;
 
+export type BulkMatFrameTarget = {
+  targetCount: number;
+  skippedCount: number;
+  currentValues: { matWidthMm?: number; frame?: ArtworkFrame }[];
+  onApply: (
+    changes: { matWidthMm?: number; frame?: ArtworkFrame }
+  ) => Promise<{ updated: number; skipped: number }>;
+};
+
 // Bulk mat & frame as an inline disclosure — the multi-selection counterpart
 // of ArtworkInspector's Mat & frame section, sharing its field vocabulary
 // (Mat/Frame pair, Finish row). Unlike the single inspector it edits a local
@@ -559,20 +568,13 @@ const DEFAULT_FRAME_WIDTH_MM = 25.4;
 // arrange session: the Apply/Cancel pair uses the same split action-group
 // treatment. Applying always sets BOTH bands — an empty band means "none" —
 // so one apply can set or strip framing across the whole selection.
-function MatFrameSection({
+export function MatFrameSection({
   selectionKey,
   matFrame,
   unit
 }: {
   selectionKey: string;
-  matFrame: {
-    targetCount: number;
-    skippedCount: number;
-    currentValues: { matWidthMm?: number; frame?: ArtworkFrame }[];
-    onApply: (
-      changes: { matWidthMm?: number; frame?: ArtworkFrame }
-    ) => Promise<{ updated: number; skipped: number }>;
-  };
+  matFrame: BulkMatFrameTarget;
   unit: DisplayUnit;
 }) {
   const { displayUnit, parseUnit, system } = getScopedUnitContext(unit, "artwork");
@@ -592,10 +594,21 @@ function MatFrameSection({
     setApplyState("idle");
   }, [selectionKey]);
 
+  // True from the first keystroke in a band field until it commits. A band
+  // commits on blur, and the blur of a click on Apply lands only at mousedown:
+  // a button still disabled at that moment swallows the click. So typing
+  // alone enables Apply, and applyDraft re-checks dirtiness once the blur has
+  // committed (a no-op apply still never runs).
+  const [editingBand, setEditingBand] = useState(false);
+  useEffect(() => {
+    setEditingBand(false);
+  }, [selectionKey]);
+
   const resetDraft = () => {
     setMatWidthMm(undefined);
     setFrame(undefined);
     setApplyState("idle");
+    setEditingBand(false);
   };
 
   // Blank is a real batch value (remove the band), so dirty state compares
@@ -617,6 +630,8 @@ function MatFrameSection({
       : `Apply to ${workLabel}`;
 
   const applyDraft = async () => {
+    setEditingBand(false);
+    if (!isDirty) return;
     setApplyState("applying");
     try {
       const result = await matFrame.onApply({ matWidthMm, frame });
@@ -645,8 +660,13 @@ function MatFrameSection({
           displayUnit={displayUnit}
           parseUnit={parseUnit}
           placeholder={matPlaceholder}
+          hideFocusHint
+          onEditStart={() => setEditingBand(true)}
           onClear={() => setMatWidthMm(undefined)}
-          onCommit={(valueMm) => setMatWidthMm(valueMm)}
+          onCommit={(valueMm) => {
+            setEditingBand(false);
+            setMatWidthMm(valueMm);
+          }}
         />
         <LengthField
           compact
@@ -659,10 +679,13 @@ function MatFrameSection({
           placeholder={framePlaceholder}
           // Clearing the frame width removes the frame entirely; setting it
           // keeps (or defaults) the finish — same rule as the inspector.
+          hideFocusHint
+          onEditStart={() => setEditingBand(true)}
           onClear={() => setFrame(undefined)}
-          onCommit={(valueMm) =>
-            setFrame((current) => ({ widthMm: valueMm, finish: current?.finish ?? "black" }))
-          }
+          onCommit={(valueMm) => {
+            setEditingBand(false);
+            setFrame((current) => ({ widthMm: valueMm, finish: current?.finish ?? "black" }));
+          }}
         />
         {/* Finish spans the grid as its own full row below the Mat | Frame
             pair — same stacked-label treatment, edges flush with the pair. */}
@@ -711,7 +734,7 @@ function MatFrameSection({
         <Button
           className={`inspector-action arrange-apply${isApplied ? " disabled:opacity-100" : ""}`}
           data-applied={isApplied || undefined}
-          disabled={matFrame.targetCount === 0 || !isDirty || isApplying}
+          disabled={matFrame.targetCount === 0 || (!isDirty && !editingBand) || isApplying}
           variant="primary"
           onClick={() => void applyDraft()}
         >

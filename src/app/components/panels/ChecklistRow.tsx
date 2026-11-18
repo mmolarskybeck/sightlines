@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
+import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
 import { DotsSixVerticalIcon } from "@phosphor-icons/react/dist/csr/DotsSixVertical";
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
@@ -15,6 +16,7 @@ import {
 } from "../library/artworkDragSession";
 import { UncertaintyIndicator } from "./UncertaintyIndicator";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -56,7 +58,11 @@ export function ChecklistRow({
   onRemovePlacement,
   onRequestRemove,
   onSelect,
-  onDragStateChange
+  onDragStateChange,
+  isChecked,
+  showCheckbox,
+  onToggleChecked,
+  onDuplicate
 }: {
   artwork: Artwork | null;
   artworkId: string;
@@ -73,6 +79,10 @@ export function ChecklistRow({
   onRequestRemove: () => void;
   onSelect: () => void;
   onDragStateChange?: (artworkId: string | null) => void;
+  isChecked?: boolean;
+  showCheckbox?: boolean;
+  onToggleChecked?: (shiftKey: boolean) => void;
+  onDuplicate?: () => void;
 }) {
   const title = artwork ? artwork.title ?? "Untitled" : "Missing from library";
   // A degraded stub (library record deleted out from under the project, see
@@ -257,6 +267,7 @@ export function ChecklistRow({
       // Lets the panel's scroll-into-view effect find this row by artwork id
       // without threading a ref map through ChecklistRow.
       data-artwork-id={artworkId}
+      data-checked={isChecked ? "" : undefined}
       // Coarse pointers use our long-press drag (below); native draggable would
       // race iPadOS's own long-press, so it's suppressed there.
       draggable={isDraggable && !COARSE_POINTER}
@@ -474,6 +485,27 @@ export function ChecklistRow({
           <DotsSixVerticalIcon aria-hidden="true" weight="bold" size={16} />
         </span>
       )}
+      {onToggleChecked ? (
+        <span
+          className="checklist-check"
+          data-visible={showCheckbox || isChecked ? "" : undefined}
+          draggable={false}
+          onDragStart={(event) => event.stopPropagation()}
+        >
+          <Checkbox
+            aria-label={`Select ${title}`}
+            checked={isChecked}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleChecked(event.shiftKey);
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key === " " || event.key === "Enter") event.stopPropagation();
+            }}
+          />
+        </span>
+      ) : null}
       {thumbnailUrl ? (
         <img
           ref={thumbnailImgRef}
@@ -593,6 +625,12 @@ export function ChecklistRow({
               {/* Present only when there's a placement to remove. Not
                   destructive-toned: this returns the work to the checklist's
                   unplaced pool, it doesn't destroy anything. */}
+              {onDuplicate ? (
+                <DropdownMenuItem onSelect={() => onDuplicate()}>
+                  <CopyIcon aria-hidden="true" size={16} />
+                  Duplicate
+                </DropdownMenuItem>
+              ) : null}
               {hasPlacement ? (
                 <DropdownMenuItem onSelect={onRemovePlacement}>
                   <XIcon aria-hidden="true" size={16} />

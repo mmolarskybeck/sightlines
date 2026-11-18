@@ -9,6 +9,7 @@ import { buildOpenWallRequest, shouldOpenWallOnKey } from "../wallOpening";
 import type { Project } from "../../domain/project";
 
 export type UseDeleteAndEscapeShortcutsParams = {
+  suspended?: boolean;
   project: Project | null;
   selection: Selection;
   selectedObjectIds: string[];
@@ -33,6 +34,7 @@ export type UseDeleteAndEscapeShortcutsParams = {
 // for text editing) and an in-flight checklist drag, the same idiom as the
 // undo/redo effect above.
 export function useDeleteAndEscapeShortcuts({
+  suspended = false,
   project,
   selection,
   selectedObjectIds,
@@ -48,6 +50,7 @@ export function useDeleteAndEscapeShortcuts({
   dialogs
 }: UseDeleteAndEscapeShortcutsParams) {
   useEffect(() => {
+    if (suspended) return;
     function onKeyDown(event: KeyboardEvent) {
       // The help dialog (Radix) closes itself on Escape; closing it again
       // here is idempotent. The branch stays because the early return
@@ -157,6 +160,7 @@ export function useDeleteAndEscapeShortcuts({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
+    suspended,
     project,
     selection,
     selectedObjectIds,

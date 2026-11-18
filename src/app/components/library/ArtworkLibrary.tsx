@@ -1,17 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
-import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { FileArrowUpIcon } from "@phosphor-icons/react/dist/csr/FileArrowUp";
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
 import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
-import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { ACCEPTED_IMAGE_MIME_TYPES } from "../../../domain/assets/imageIntake";
-import type { ArtworkFrame, Artwork, DisplayUnit, Project, ProjectSummary } from "../../../domain/project";
-import { formatLength } from "../../../domain/units/length";
+import type { Artwork, DisplayUnit, Project, ProjectSummary } from "../../../domain/project";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../../domain/units/unitSystem";
 import { useAssetImageUrls } from "../../hooks/useAssetImageUrls";
-import { BulkMatFrameDialog } from "./BulkMatFrameDialog";
+import { ArtworkBulkBar } from "./ArtworkBulkBar";
+import { ArtworkTable, type ArtworkTableRow, type SortDirection } from "./ArtworkTable";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import {
@@ -23,12 +21,10 @@ import {
   DialogTitle
 } from "../ui/dialog";
 import { Input } from "../ui/input";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/dropdown-menu";
 import { SegmentedToggleGroup, SegmentedToggleGroupItem } from "../ui/segmented";
 
 type LibraryFilter = "all" | "in-project" | "not-in-project";
 type LibrarySort = "title" | "artist" | "date";
-type SortDirection = "ascending" | "descending";
 
 type LibraryCommonProps = {
   artworks: Artwork[];
@@ -42,7 +38,6 @@ export function ArtworkLibraryView({
   getBlob,
   onAddToChecklist,
   onDeleteArtworks,
-  onApplyMatFrame,
   onAddFiles,
   onOpenImportWizard,
   pendingDuplicateUploads = [],
@@ -50,16 +45,14 @@ export function ArtworkLibraryView({
   onDismissDuplicateUploads,
   projectMembershipsByArtworkId,
   onOpenProject,
-  onEditArtwork
+  onEditArtwork,
+  onRevealInspector,
+  onDuplicateArtworks,
+  checked: checkedProp,
+  onCheckedChange
 }: LibraryCommonProps & {
   onAddToChecklist: (artworkIds: string[]) => void | Promise<void>;
   onDeleteArtworks?: (artworkIds: string[]) => void | Promise<void>;
-  // Bulk mat/frame apply for the current selection; the store skips
-  // frame-inclusive works and the dialog counts them.
-  onApplyMatFrame?: (
-    artworkIds: string[],
-    changes: { matWidthMm?: number; frame?: ArtworkFrame }
-  ) => void | Promise<void>;
   onAddFiles?: (files: File[]) => void | Promise<void>;
   onOpenImportWizard: () => void;
   pendingDuplicateUploads?: { file: File; existingArtworkTitle: string }[];
@@ -68,15 +61,30 @@ export function ArtworkLibraryView({
   projectMembershipsByArtworkId?: Map<string, ProjectSummary[]> | Record<string, ProjectSummary[]>;
   onOpenProject?: (projectId: string) => void;
   onEditArtwork?: (artworkId: string) => void;
+  // Bulk edit (fields + mat & frame) lives in the inspector, which reads the
+  // checked set; this only reveals a collapsed inspector.
+  onRevealInspector?: () => void;
+  onDuplicateArtworks?: (ids: string[]) => void | Promise<unknown>;
+  // Controlled checked set (App owns it so the inspector can edit it). Falls
+  // back to local state when uncontrolled.
+  checked?: Set<string>;
+  onCheckedChange?: (next: Set<string>) => void;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<LibraryFilter>("all");
   const [sort, setSort] = useState<{ key: LibrarySort; direction: SortDirection }>({ key: "title", direction: "ascending" });
-  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [localSelected, setLocalSelected] = useState<Set<string>>(() => new Set());
+  const selected = checkedProp ?? localSelected;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const setSelected = (update: Set<string> | ((current: Set<string>) => Set<string>)) => {
+    const next = typeof update === "function" ? update(selectedRef.current) : update;
+    if (next === selectedRef.current) return;
+    selectedRef.current = next;
+    if (onCheckedChange) onCheckedChange(next);
+    else setLocalSelected(next);
+  };
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
-  // Ids the Set-mat-&-frame dialog is open for (null = closed). Snapshotted on
-  // open so the dialog keeps its targets even if the selection list churns.
-  const [matFrameIds, setMatFrameIds] = useState<string[] | null>(null);
   const quickAddInputRef = useRef<HTMLInputElement>(null);
   // Deleted/absent artworks must never linger in the selection (they'd let a
   // stale id ride into a bulk add or delete). Prune whenever the device-level
@@ -91,11 +99,21 @@ export function ArtworkLibraryView({
   const checklistIds = useMemo(() => new Set(project.checklistArtworkIds), [project.checklistArtworkIds]);
   const matches = useArtworkMatches(artworks, query);
   const rows = useMemo(() => sortArtworks(matches.filter((artwork) => filter === "all" || (filter === "in-project" ? checklistIds.has(artwork.id) : !checklistIds.has(artwork.id))), sort.key, sort.direction), [checklistIds, filter, matches, sort]);
+  const tableRows = useMemo<ArtworkTableRow[]>(() => rows.map((artwork) => ({ id: artwork.id, artwork })), [rows]);
+  const hiddenCount = [...selected].filter((id) => !rows.some((row) => row.id === id)).length;
   const thumbnails = useAssetImageUrls(artworks.map((artwork) => artwork.assetId), getBlob);
   const unit = artworkDisplayUnit(project.unit);
 
   return (
-    <section aria-labelledby="artwork-library-title" className="artwork-library-view">
+    <section
+      aria-labelledby="artwork-library-title"
+      className="artwork-library-view"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !event.defaultPrevented && selected.size > 0 && pendingDeleteIds === null) {
+          setSelected(new Set());
+        }
+      }}
+    >
       <header className="artwork-library-header">
         <div>
           <h1 id="artwork-library-title">Artwork Library</h1>
@@ -180,7 +198,19 @@ export function ArtworkLibraryView({
               </span>
             </div>
           </div>
-          {selected.size > 0 ? <div className="artwork-library-selection" role="status"><span>{selected.size} selected</span><Button size="sm" variant="primary" onClick={() => { void onAddToChecklist([...selected]); setSelected(new Set()); }}>Add selected to checklist</Button>{onApplyMatFrame ? <Button size="sm" variant="outline" onClick={() => setMatFrameIds([...selected])}>Set mat &amp; frame</Button> : null}{onDeleteArtworks ? <Button size="sm" variant="destructive-ghost" onClick={() => setPendingDeleteIds([...selected])}><TrashIcon aria-hidden="true" size={14} /> Delete</Button> : null}<Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Clear</Button></div> : null}
+          {selected.size > 0 ? (
+            <ArtworkBulkBar
+              scope="library"
+              variant="full"
+              checkedCount={selected.size}
+              hiddenCount={hiddenCount}
+              onAddToChecklist={() => { void onAddToChecklist([...selected]); setSelected(new Set()); }}
+              onEdit={onRevealInspector}
+              onDuplicate={() => { void onDuplicateArtworks?.([...selected]); }}
+              onDelete={onDeleteArtworks ? () => setPendingDeleteIds([...selected]) : undefined}
+              onClear={() => setSelected(new Set())}
+            />
+          ) : null}
           {rows.length === 0 ? (
             <div className="artwork-library-no-results">
               <p>{query.trim() ? `No artworks match “${query}”.` : filter === "in-project" ? "No library artworks are in this checklist." : "Every library artwork is already in this checklist."}</p>
@@ -188,14 +218,18 @@ export function ArtworkLibraryView({
             </div>
           ) : (
             <ArtworkTable
-              artworks={rows}
+              scope="library"
+              rows={tableRows}
               checklistIds={checklistIds}
               thumbnails={thumbnails}
               unit={unit}
-              selected={selected}
+              checked={selected}
               sort={sort}
-              onSort={(key) => setSort((current) => ({ key, direction: current.key === key && current.direction === "ascending" ? "descending" : "ascending" }))}
-              onSelectionChange={setSelected}
+              onSort={(key) => {
+                if (key !== "title" && key !== "artist" && key !== "date") return;
+                setSort((current) => ({ key, direction: current.key === key && current.direction === "ascending" ? "descending" : "ascending" }));
+              }}
+              onCheckedChange={setSelected}
               projectMembershipsByArtworkId={projectMembershipsByArtworkId}
               onOpenProject={onOpenProject}
               onEditArtwork={onEditArtwork}
@@ -204,24 +238,6 @@ export function ArtworkLibraryView({
           )}
         </>
       )}
-      {onApplyMatFrame ? (
-        <BulkMatFrameDialog
-          open={matFrameIds !== null}
-          // The store skips frame-inclusive works, so the count and note here
-          // split the picked ids the same way it will.
-          targetCount={(matFrameIds ?? []).filter((id) => !isFrameInclusive(artworks, id)).length}
-          skippedCount={(matFrameIds ?? []).filter((id) => isFrameInclusive(artworks, id)).length}
-          unit={project.unit}
-          onOpenChange={(open) => {
-            if (!open) setMatFrameIds(null);
-          }}
-          onApply={(changes) => {
-            void onApplyMatFrame(matFrameIds ?? [], changes);
-            setSelected(new Set());
-            setMatFrameIds(null);
-          }}
-        />
-      ) : null}
       <DeleteArtworksDialog
         pendingIds={pendingDeleteIds}
         artworks={artworks}
@@ -410,47 +426,10 @@ function SearchField({ value, onChange, autoFocus = false }: { value: string; on
   return <label className="artwork-library-search"><MagnifyingGlassIcon aria-hidden="true" size={16} /><span className="visually-hidden">Search artworks</span><Input autoFocus={autoFocus} placeholder="Search title, artist, date, or object number" type="search" value={value} onChange={(event) => onChange(event.target.value)} /></label>;
 }
 
-function ArtworkTable({ artworks, checklistIds, thumbnails, unit, selected, sort, onSort, onSelectionChange, projectMembershipsByArtworkId, onOpenProject, onEditArtwork, onAdd }: { artworks: Artwork[]; checklistIds: Set<string>; thumbnails: Map<string, string>; unit: DisplayUnit; selected: Set<string>; sort: { key: LibrarySort; direction: SortDirection }; onSort: (key: LibrarySort) => void; onSelectionChange: (selected: Set<string>) => void; projectMembershipsByArtworkId?: Map<string, ProjectSummary[]> | Record<string, ProjectSummary[]>; onOpenProject?: (projectId: string) => void; onEditArtwork?: (artworkId: string) => void; onAdd: (id: string) => void }) {
-  const membershipsFor = (id: string) => projectMembershipsByArtworkId instanceof Map ? projectMembershipsByArtworkId.get(id) : projectMembershipsByArtworkId?.[id];
-  const hasProjects = Boolean(projectMembershipsByArtworkId);
-  const allVisibleSelected = artworks.length > 0 && artworks.every((artwork) => selected.has(artwork.id));
-  const someVisibleSelected = artworks.some((artwork) => selected.has(artwork.id));
-  const toggleAllVisible = () => {
-    const next = new Set(selected);
-    if (allVisibleSelected) artworks.forEach((artwork) => next.delete(artwork.id));
-    else artworks.forEach((artwork) => next.add(artwork.id));
-    onSelectionChange(next);
-  };
-  return <div className="artwork-library-table-scroll"><table className="artwork-library-table"><thead><tr><th className="artwork-table-select" scope="col"><Checkbox aria-label="Select all shown artworks" checked={allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false} onCheckedChange={toggleAllVisible} /></th><SortableHeader active={sort.key === "title"} direction={sort.direction} label="Artwork" onClick={() => onSort("title")} /><SortableHeader active={sort.key === "artist"} direction={sort.direction} label="Artist" onClick={() => onSort("artist")} /><SortableHeader active={sort.key === "date"} direction={sort.direction} label="Date" onClick={() => onSort("date")} /><th scope="col">Dimensions</th>{hasProjects ? <th scope="col">Used in</th> : null}<th scope="col">This project</th></tr></thead><tbody>{artworks.map((artwork) => {
-    const isAdded = checklistIds.has(artwork.id);
-    const thumbnail = artwork.assetId ? thumbnails.get(artwork.assetId) : undefined;
-    const projects = membershipsFor(artwork.id) ?? [];
-    const title = artwork.title?.trim() || "Untitled";
-    return <tr data-selected={selected.has(artwork.id) ? "" : undefined} key={artwork.id}><td className="artwork-table-select"><Checkbox aria-label={`Select ${title}`} checked={selected.has(artwork.id)} onCheckedChange={() => { const next = new Set(selected); if (next.has(artwork.id)) next.delete(artwork.id); else next.add(artwork.id); onSelectionChange(next); }} /></td><th scope="row"><button className="artwork-table-identity artwork-table-edit" type="button" onClick={() => onEditArtwork?.(artwork.id)}><span className="artwork-table-thumbnail">{thumbnail ? <img alt="" src={thumbnail} /> : <ImageSquareIcon aria-hidden="true" size={18} />}</span><span>{title}</span></button></th><td>{artwork.artist?.trim() || <span className="artwork-table-muted">Unknown</span>}</td><td>{artwork.date || <span className="artwork-table-muted">—</span>}</td><td className="artwork-table-dimensions">{formatDimensions(artwork, unit)}</td>{hasProjects ? <td><ProjectMembershipMenu projects={projects} onOpenProject={onOpenProject} /></td> : null}<td>{isAdded ? <span className="artwork-membership"><CheckIcon aria-hidden="true" size={13} /> In checklist</span> : <Button aria-label={`Add ${title} to current checklist`} size="sm" variant="outline" onClick={() => onAdd(artwork.id)}><PlusIcon aria-hidden="true" size={14} /> Add</Button>}</td></tr>;
-  })}</tbody></table></div>;
-}
-
-function SortableHeader({ active, direction, label, onClick }: { active: boolean; direction: SortDirection; label: string; onClick: () => void }) {
-  return <th aria-sort={active ? direction : "none"} scope="col"><button className="artwork-table-sort" type="button" onClick={onClick}>{label}<span aria-hidden="true">{active ? (direction === "ascending" ? "↑" : "↓") : "↕"}</span></button></th>;
-}
-
-function ProjectMembershipMenu({ projects, onOpenProject }: { projects: ProjectSummary[]; onOpenProject?: (projectId: string) => void }) {
-  if (projects.length === 0) return <span className="artwork-table-muted">Unused</span>;
-  if (projects.length === 1) {
-    const [only] = projects;
-    const title = only.title?.trim() || "Untitled project";
-    return <Button aria-label={`Open ${title}`} className="artwork-membership-project" size="sm" variant="ghost" onClick={() => onOpenProject?.(only.id)}><span className="artwork-membership-project-label">{title}</span></Button>;
-  }
-  return <DropdownMenu><DropdownMenuTrigger asChild><Button aria-label={`Used in ${projects.length} projects`} className="artwork-membership-project" size="sm" variant="ghost"><span className="artwork-membership-project-label">{projects.length} projects</span><CaretDownIcon aria-hidden="true" size={12} /></Button></DropdownMenuTrigger><DropdownMenuContent align="start">{projects.map((project) => <DropdownMenuItem key={project.id} onSelect={() => onOpenProject?.(project.id)}>{project.title}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>;
-}
-
 function useArtworkMatches(artworks: Artwork[], query: string) {
   return useMemo(() => { const needle = query.trim().toLocaleLowerCase(); if (!needle) return artworks; return artworks.filter((artwork) => [artwork.title, artwork.artist, artwork.date, artwork.accessionNumber].some((value) => value?.toLocaleLowerCase().includes(needle))); }, [artworks, query]);
 }
 
 function sortArtworks(artworks: Artwork[], sort: LibrarySort, direction: SortDirection) { return [...artworks].sort((a, b) => { const value = (artwork: Artwork) => sort === "artist" ? artwork.artist : sort === "date" ? artwork.date : artwork.title; const result = (value(a)?.trim() || "\uffff").localeCompare(value(b)?.trim() || "\uffff", undefined, { sensitivity: "base", numeric: true }); return direction === "ascending" ? result : -result; }); }
 
-// A work whose stored size already includes the frame — the bulk apply skips it.
-function isFrameInclusive(artworks: Artwork[], id: string) { return artworks.find((artwork) => artwork.id === id)?.frameIncludedInImage === true; }
 function artworkDisplayUnit(projectUnit: DisplayUnit) { return getScopeUnits(unitSystemFromDisplayUnit(projectUnit), "artwork").displayUnit; }
-function formatDimensions(artwork: Artwork, unit: DisplayUnit) { const { widthMm, heightMm } = artwork.dimensions; if (widthMm === undefined || heightMm === undefined) return "—"; return `${formatLength(widthMm, { unit })} × ${formatLength(heightMm, { unit })}`; }

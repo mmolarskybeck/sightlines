@@ -40,6 +40,8 @@ import { PanelResizeHandle } from "./components/shared/PanelResizeHandle";
 import { describeSharedOpeningConflict } from "./components/placement/sharedOpeningIssueCopy";
 import { selectSharedOpeningConflicts } from "../domain/placement/sharedOpeningIssues";
 import { ChecklistPanel } from "./components/panels/ChecklistPanel";
+import { ChecklistEditorView } from "./components/panels/ChecklistEditorView";
+import { NewArtworkDialog } from "./components/library/NewArtworkDialog";
 import { ElevationEmptyState } from "./components/elevation/ElevationEmptyState";
 import { PlanEmptyState } from "./components/plan/PlanEmptyState";
 import { PlanView } from "./components/plan/PlanView";
@@ -220,7 +222,9 @@ export function App() {
   const dismissDuplicateUploads = useAppStore((state) => state.dismissDuplicateUploads);
   const removeArtworkFromChecklist = useAppStore((state) => state.removeArtworkFromChecklist);
   const deleteLibraryArtworks = useAppStore((state) => state.deleteLibraryArtworks);
-  const updateArtworksMatFrame = useAppStore((state) => state.updateArtworksMatFrame);
+  const removeArtworksFromChecklist = useAppStore((state) => state.removeArtworksFromChecklist);
+  const duplicateArtworks = useAppStore((state) => state.duplicateArtworks);
+  const createBlankArtwork = useAppStore((state) => state.createBlankArtwork);
   const placeArtwork = useAppStore((state) => state.placeArtwork);
   const placeArtworkOnFloor = useAppStore((state) => state.placeArtworkOnFloor);
   const moveArtworkPlacement = useAppStore((state) => state.moveArtworkPlacement);
@@ -420,8 +424,15 @@ export function App() {
     }
   }, [inspectorCollapsed, isCompactWorkspace, leftPanel]);
 
+  // The full-window checklist editor (Expand on the checklist pane). Local
+  // workspace state rather than a ViewMode, preserving the canvas view Back
+  // returns to. Canvas shortcuts are suspended while the editor covers it.
+  const [checklistEditorOpen, setChecklistEditorOpen] = useState(false);
+  const showChecklistEditor = checklistEditorOpen && viewMode !== "library";
   const visibleLeftPanel =
-    viewMode === "library" || (isCompactWorkspace && compactWorkspaceSide === "right")
+    viewMode === "library" ||
+    showChecklistEditor ||
+    (isCompactWorkspace && compactWorkspaceSide === "right")
       ? null
       : leftPanel;
   const visibleInspectorCollapsed = isCompactWorkspace
@@ -538,6 +549,7 @@ export function App() {
   }, [draggingArtworkId]);
 
   useDeleteAndEscapeShortcuts({
+    suspended: showChecklistEditor,
     project,
     selection,
     selectedObjectIds,
@@ -554,6 +566,7 @@ export function App() {
   });
 
   useArrangeNudgeShortcuts({
+    suspended: showChecklistEditor,
     project,
     artworks: libraryArtworks,
     viewMode,
@@ -573,9 +586,8 @@ export function App() {
 
   useToolbarShortcuts({
     viewMode,
-    // Any open workspace dialog owns the keyboard — stand down so a toolbar
-    // letter never fires behind it.
-    suspended: dialogs.anyOpen,
+    // Dialogs and the checklist editor own the keyboard while covering the canvas.
+    suspended: dialogs.anyOpen || showChecklistEditor,
     insertDisabled: elevationInsertBlocked,
     activeTool,
     armOpeningTool,
@@ -598,7 +610,7 @@ export function App() {
 
   useTemporaryMeasurementShortcuts({
     active: measurementActive,
-    suspended: dialogs.anyOpen,
+    suspended: dialogs.anyOpen || showChecklistEditor,
     state: measurement.state,
     dispatch: measurement.dispatch
   });
@@ -608,7 +620,7 @@ export function App() {
   }, [measurementActive, measurement.clear]);
 
   useEffect(() => {
-    if (!measurementActive) return;
+    if (!measurementActive || showChecklistEditor) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       if (
@@ -636,7 +648,8 @@ export function App() {
     measurement.state,
     measurement.dispatch,
     disarmPlanMode,
-    dialogs.anyOpen
+    dialogs.anyOpen,
+    showChecklistEditor
   ]);
 
   const artworksById = useArtworksById();
@@ -688,7 +701,10 @@ export function App() {
       viewMode,
       project?.unit ?? "no-project",
       gridPrecisionFloorMm ?? "auto",
-      project?.floor.rooms.length ?? 0
+      project?.floor.rooms.length ?? 0,
+      // The checklist editor unmounts the toolbar; its return mounts a fresh
+      // element the previous measurement never saw.
+      showChecklistEditor ? "editor" : "canvas"
     ].join(":")
   );
 
@@ -747,6 +763,50 @@ export function App() {
     setSnapshotExportMode,
     dialogs
   });
+
+  // Checklist bulk tools (above the early return, like every hook here). The
+  // checked set is workspace state, NOT the canvas selection: it can mix
+  // placed and unplaced works, and it is shared by the checklist pane and the
+  // full-window checklist editor so it survives Expand/Back. Keyed to the
+  // project: a project switch clears it, and ids that leave the checklist are
+  // pruned from the stored set (not just hidden), so an undo or re-add never
+  // revives an old check.
+  const [checkedArtworkIds, setCheckedArtworkIds] = useState<Set<string>>(() => new Set());
+  // The Library's checked set, App-owned for the same reason: the inspector
+  // edits whichever set is showing.
+  const [libraryCheckedIds, setLibraryCheckedIds] = useState<Set<string>>(() => new Set());
+  const [newArtworkOpen, setNewArtworkOpen] = useState(false);
+  const checkedProjectId = project?.id ?? null;
+  useEffect(() => {
+    setCheckedArtworkIds(new Set());
+    setChecklistEditorOpen(false);
+  }, [checkedProjectId]);
+  const checklistMembership = project?.checklistArtworkIds;
+  useEffect(() => {
+    if (!checklistMembership) return;
+    setCheckedArtworkIds((current) => {
+      const members = new Set(checklistMembership);
+      if ([...current].every((id) => members.has(id))) return current;
+      return new Set([...current].filter((id) => members.has(id)));
+    });
+  }, [checklistMembership]);
+  // Leaving for the Library or picking another canvas view closes the editor.
+  useEffect(() => {
+    setChecklistEditorOpen(false);
+  }, [viewMode]);
+  // Selection mode ends when a work is selected some other way (canvas click,
+  // Select on canvas, a single duplicate): the inspector follows the new
+  // selection, so stale checks must not keep it on the bulk panel. Row clicks
+  // while checking toggle checks and never change the selection.
+  const isFirstSelectionRef = useRef(true);
+  useEffect(() => {
+    if (isFirstSelectionRef.current) {
+      isFirstSelectionRef.current = false;
+      return;
+    }
+    setCheckedArtworkIds((current) => (current.size === 0 ? current : new Set()));
+    setLibraryCheckedIds((current) => (current.size === 0 ? current : new Set()));
+  }, [selection]);
 
   if (!project) {
     return (
@@ -909,12 +969,56 @@ export function App() {
     "--left-panel-width": `${leftPanelWidth}px`,
     "--inspector-width": `${inspectorWidth}px`
   } as React.CSSProperties;
+  // Bulk editing lives in the inspector; when it is hidden, the bulk bar
+  // offers this to bring it back.
+  const revealInspector = visibleInspectorCollapsed
+    ? () => {
+        if (isCompactWorkspace) setCompactWorkspaceSide("right");
+        if (inspectorCollapsed) toggleInspectorCollapsed();
+      }
+    : undefined;
+  const inspectorCheckedIds = viewMode === "library" ? libraryCheckedIds : checkedArtworkIds;
+  const clearInspectorChecked =
+    viewMode === "library"
+      ? () => setLibraryCheckedIds(new Set())
+      : () => setCheckedArtworkIds(new Set());
+
+  // Bulk actions shared by the checklist pane and the checklist editor.
+  const checklistBulkHandlers = {
+    onDuplicate: (ids: string[]) => void duplicateArtworks(ids),
+    onRemove: (ids: string[]) => void removeArtworksFromChecklist(ids)
+  };
+
+  // "Select on canvas": hand the checked works that are placed to the canvas
+  // selection, landing where they can all be seen — the one wall's elevation
+  // when they share a wall, otherwise the plan.
+  const selectCheckedOnCanvas = (ids: string[]) => {
+    const idSet = new Set(ids);
+    const wallPlacements = project.wallObjects.filter(
+      (object) => object.kind === "artwork" && idSet.has(object.artworkId)
+    );
+    const floorPlacements = project.floorObjects.filter(
+      (object) => object.kind === "artwork" && idSet.has(object.artworkId)
+    );
+    const placementIds = [...wallPlacements, ...floorPlacements].map((object) => object.id);
+    if (placementIds.length === 0) return;
+    const wallIds = new Set(wallPlacements.map((object) => object.wallId));
+    setChecklistEditorOpen(false);
+    if (floorPlacements.length === 0 && wallIds.size === 1) {
+      focusWallContext([...wallIds][0]);
+      setViewMode("elevation");
+    } else {
+      setViewMode("plan");
+    }
+    setObjectSelection(placementIds);
+  };
+
   const workspaceClassName = [
     "workspace",
     visibleLeftPanel ? null : "left-collapsed",
     visibleInspectorCollapsed ? "right-collapsed" : null,
     // Library view seats the inspector toggle in its header lane.
-    viewMode === "library" ? "library-view" : null
+    viewMode === "library" || showChecklistEditor ? "library-view" : null
   ]
     .filter(Boolean)
     .join(" ");
@@ -1055,6 +1159,14 @@ export function App() {
             onRemoveArtworkFromChecklist={removeArtworkFromChecklist}
             onRemovePlacement={removePlacement}
             onSelectArtwork={selectArtwork}
+            checkedArtworkIds={checkedArtworkIds}
+            onCheckedChange={setCheckedArtworkIds}
+            onRevealInspector={revealInspector}
+            onDuplicateArtworks={checklistBulkHandlers.onDuplicate}
+            onRemoveArtworksFromChecklist={checklistBulkHandlers.onRemove}
+            onSelectOnCanvas={selectCheckedOnCanvas}
+            onNewArtwork={() => setNewArtworkOpen(true)}
+            onExpand={() => setChecklistEditorOpen(true)}
           />
         ) : visibleLeftPanel === "rooms" ? (
           <RoomsPanel
@@ -1080,6 +1192,28 @@ export function App() {
         ) : null}
 
         <section className="canvas-column">
+          {showChecklistEditor ? (
+            <ChecklistEditorView
+              project={project}
+              libraryArtworks={libraryArtworks}
+              getBlob={getAssetBlob}
+              selectedArtworkId={selectedArtworkId}
+              checked={checkedArtworkIds}
+              onCheckedChange={setCheckedArtworkIds}
+              onSelectArtwork={(artworkId) => {
+                selectArtwork(artworkId);
+                if (inspectorCollapsed) toggleInspectorCollapsed();
+              }}
+              onChangeChecklistView={setChecklistView}
+              onBack={() => setChecklistEditorOpen(false)}
+              {...checklistBulkHandlers}
+              onRevealInspector={revealInspector}
+              onSelectOnCanvas={selectCheckedOnCanvas}
+              onNewArtwork={() => setNewArtworkOpen(true)}
+              onOpenArtworkLibrary={() => dialogs.open("libraryPicker")}
+            />
+          ) : (
+          <>
           {viewMode !== "library" &&
           (viewMode !== "3d" || project.floor.rooms.length > 0) ? (
             <div className="view-toolbar" ref={toolbarRef}>
@@ -1444,7 +1578,10 @@ export function App() {
               getBlob={getAssetBlob}
               onAddToChecklist={addExistingArtworksToChecklist}
               onDeleteArtworks={(ids) => void deleteLibraryArtworks(ids)}
-              onApplyMatFrame={(ids, changes) => void updateArtworksMatFrame(ids, changes)}
+              checked={libraryCheckedIds}
+              onCheckedChange={setLibraryCheckedIds}
+              onRevealInspector={revealInspector}
+              onDuplicateArtworks={(ids) => duplicateArtworks(ids)}
               onAddFiles={(files) => void addArtworksFromFiles(files, { destination: "library" })}
               pendingDuplicateUploads={pendingDuplicateUploads.filter(
                 (entry) => entry.destination === "library"
@@ -1540,6 +1677,8 @@ export function App() {
               />
             </Suspense>
           ) : null}
+          </>
+          )}
         </section>
 
         {!visibleInspectorCollapsed ? (
@@ -1557,10 +1696,20 @@ export function App() {
           toggleReshapeRoom={toggleReshapeRoom}
           armDuplicatePartition={armDuplicatePartition}
           requestSetNorthWall={requestSetNorthWall}
+          checkedWorks={{
+            artworkIds: [...inspectorCheckedIds],
+            onClear: clearInspectorChecked
+          }}
         />
         ) : null}
       </section>
       </div>
+      <NewArtworkDialog
+        open={newArtworkOpen}
+        unit={project.unit}
+        onOpenChange={setNewArtworkOpen}
+        onCreate={createBlankArtwork}
+      />
       <AppDialogs
         dialogs={dialogs}
         importDestination={importDestination}

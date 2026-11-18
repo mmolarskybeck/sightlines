@@ -1,4 +1,7 @@
-import { useState, type KeyboardEvent, type ReactNode } from "react";
+import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { ImageIcon } from "@phosphor-icons/react/dist/csr/Image";
+import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
+import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { LinkBreakIcon } from "@phosphor-icons/react/dist/csr/LinkBreak";
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/csr/LockSimple";
 import { LockSimpleOpenIcon } from "@phosphor-icons/react/dist/csr/LockSimpleOpen";
@@ -32,6 +35,8 @@ import {
   type ArtworkScaleState
 } from "../../../domain/artworkScale";
 import { formatLength } from "../../../domain/units/length";
+import { ACCEPTED_IMAGE_MIME_TYPES } from "../../../domain/assets/imageIntake";
+import { DISPLAY_AS_OPTIONS } from "./displayAsOptions";
 import { getScopedUnitContext } from "../shared/scopedUnits";
 import { useArtworkAsset } from "../../hooks/useArtworkAsset";
 import {
@@ -48,6 +53,12 @@ import { LengthField } from "../shared/LengthField";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Combobox } from "../ui/combobox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from "../ui/dropdown-menu";
 import { Field } from "../ui/field";
 import { Input } from "../ui/input";
 import { Toggle } from "../ui/toggle";
@@ -80,19 +91,6 @@ export type ArtworkFieldChanges = Partial<
 > & {
   medium?: string;
 };
-
-// The "Display" dropdown's options. Every one of them is a storable value now:
-// the control shows the RESOLVED type (effectiveDisplayAs, which answers the
-// medium-derived or framed default when the record states nothing), and picking
-// any entry writes it explicitly. There is deliberately no "Auto" row — a
-// curator reading this panel wants to know what the work IS in the room, and
-// pinning the answer they can already see is the harmless case.
-const DISPLAY_AS_OPTIONS: { value: ArtworkDisplayAs; label: string }[] = [
-  { value: "framed", label: "Wall work" },
-  { value: "projection", label: "Wall projection" },
-  { value: "monitor", label: "Box monitor" },
-  { value: "sculpture", label: "Sculpture" }
-];
 
 type ArtworkFieldSpec = {
   key: ArtworkEditableFieldKey;
@@ -176,9 +174,14 @@ export function ArtworkInspector({
   onCommitFraming,
   onRemovePlacement,
   onSectionOpenChange,
+  onReplaceImage,
+  onRemoveImage,
   unit
 }: {
   artwork: Artwork;
+  // Image controls: omitted → the thumbnail is display-only.
+  onReplaceImage?: (file: File) => void;
+  onRemoveImage?: () => void;
   // The segment the Type row shows as active. App derives it from the SURFACE a
   // placed work sits on, and from effectivePlacementForm only while it's
   // unplaced — see PlacementTypeRow.
@@ -265,6 +268,8 @@ export function ArtworkInspector({
         thumbnailUrl={thumbnailUrl}
         unit={unit}
         onCommitField={onCommitField}
+        onReplaceImage={onReplaceImage}
+        onRemoveImage={onRemoveImage}
       />
 
       {/* The collapsible middle of the panel: hairline-separated rows with
@@ -404,14 +409,19 @@ function ArtworkIdentity({
   aspect,
   thumbnailUrl,
   unit,
-  onCommitField
+  onCommitField,
+  onReplaceImage,
+  onRemoveImage
 }: {
   artwork: Artwork;
   aspect: PixelAspect;
   thumbnailUrl?: string;
   unit: DisplayUnit;
   onCommitField: (changes: ArtworkFieldChanges) => void;
+  onReplaceImage?: (file: File) => void;
+  onRemoveImage?: () => void;
 }) {
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const complete = isArtworkRecordComplete(artwork);
   // Explicit-edit latch, separate from `!complete`: once a record is complete
   // it re-expands only when the curator asks (Edit details) or focuses a
@@ -434,8 +444,33 @@ function ArtworkIdentity({
 
   return (
     <div className="artwork-inspector-header">
+      {onReplaceImage ? (
+        <input
+          ref={imageInputRef}
+          accept={ACCEPTED_IMAGE_MIME_TYPES.join(",")}
+          aria-label="Choose image file"
+          className="visually-hidden"
+          tabIndex={-1}
+          type="file"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) onReplaceImage(file);
+            event.target.value = "";
+          }}
+        />
+      ) : null}
       {thumbnailUrl ? (
-        <img
+        onReplaceImage ? (
+          // modal={false}: same body pointer-events reason as the checklist
+          // row's overflow menu, since "Replace image" opens a file picker.
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <button
+                aria-label="Image options"
+                className="artwork-inspector-thumb-button"
+                type="button"
+              >
+                <img
           alt=""
           className="artwork-inspector-thumb"
           src={thumbnailUrl}
@@ -448,6 +483,45 @@ function ArtworkIdentity({
               : undefined
           }
         />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onSelect={() => imageInputRef.current?.click()}>
+                <ImageIcon aria-hidden="true" size={16} />
+                Replace image…
+              </DropdownMenuItem>
+              {onRemoveImage ? (
+                <DropdownMenuItem onSelect={() => onRemoveImage()}>
+                  <TrashIcon aria-hidden="true" size={16} />
+                  Remove image
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <img
+          alt=""
+          className="artwork-inspector-thumb"
+          src={thumbnailUrl}
+          // Aspect-true: the square slot's object-fit contains the image, but
+          // handing the browser the intrinsic ratio avoids a paint-time
+          // reflow once it loads.
+          style={
+            aspect.widthPx && aspect.heightPx
+              ? { aspectRatio: `${aspect.widthPx} / ${aspect.heightPx}` }
+              : undefined
+          }
+        />
+        )
+      ) : onReplaceImage ? (
+        <button
+          className="artwork-inspector-thumb placeholder artwork-inspector-add-image"
+          type="button"
+          onClick={() => imageInputRef.current?.click()}
+        >
+          <ImageSquareIcon aria-hidden="true" size={20} />
+          <span>Add image…</span>
+        </button>
       ) : (
         <div aria-hidden="true" className="artwork-inspector-thumb placeholder" />
       )}

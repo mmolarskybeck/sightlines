@@ -9,6 +9,13 @@ Small, actionable scraps that don't fit the roadmap (`docs/plan.md` §9) or the 
 * Dimension lines only appear on selection. Add an always-visible option (elevation: spacing between every object on the visible wall, with intelligent changes on drag), and a switchable floor-to-bottom-of-work dimension family — noisy most of the time, wanted on PDF/PNG export.
 * Hand tool for plan/elevation: 2D pan is gesture-only (space-drag, middle/right-drag). If the 3D hand tool tests well, add the same button for consistency.
 
+## Upcoming (filed 2026-11-09, after the checklist-management round)
+
+* Salon/gallery hang spacing: make X and Y gaps match across a selected group; nudge works the same amount up/down from the eyeline. Builds on `arrangeSlice`/`SelectionInspector`; "Select on canvas" from checked works is the entry point.
+* 3D "walls up / walls down" mode that hides foreground walls (and their frames).
+* 3D: keep a wall up so a sightline through an open door into the room reads from outside.
+* 3D: cm/ft toggle; move/nudge wall text and other objects, not just artworks; add doors and windows (parity with plan/elevation); a rotate control next to the hand tool for selected objects.
+
 ## Project management
 
 * Bulk edit of projects in the project manager.

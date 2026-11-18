@@ -97,7 +97,7 @@ describe("ArtworkLibraryView", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Available" }));
     expect(screen.queryByText("Wind and Crepe Myrtle Concerto")).toBeNull();
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Relative" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add selected to checklist" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add to checklist" }));
     expect(onAddToChecklist).toHaveBeenCalledWith(["art-2"]);
   });
 

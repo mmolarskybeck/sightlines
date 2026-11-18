@@ -1,16 +1,19 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { ArrowsOutSimpleIcon } from "@phosphor-icons/react/dist/csr/ArrowsOutSimple";
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { FileArrowUpIcon } from "@phosphor-icons/react/dist/csr/FileArrowUp";
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/csr/ImageSquare";
 import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
+import { RectangleIcon } from "@phosphor-icons/react/dist/csr/Rectangle";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { ACCEPTED_IMAGE_MIME_TYPES } from "../../../domain/assets/imageIntake";
 import type { Artwork, Project } from "../../../domain/project";
 import { getScopeUnits, unitSystemFromDisplayUnit } from "../../../domain/units/unitSystem";
 import { useAssetImageUrls } from "../../hooks/useAssetImageUrls";
+import { ArtworkBulkBar } from "../library/ArtworkBulkBar";
 import { ChecklistRow } from "./ChecklistRow";
 import {
   CHECKLIST_SORTS,
@@ -45,6 +48,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 
 type ChecklistFilter = "all" | "placed" | "unplaced";
 
+const NO_CHECKED_IDS: Set<string> = new Set();
+
 const SORT_LABELS: Record<ChecklistSort, string> = {
   project: "Project order",
   title: "Title",
@@ -73,7 +78,15 @@ export function ChecklistPanel({
   onRemoveArtworkFromChecklist,
   onRemovePlacement,
   onSelectArtwork,
-  getBlob
+  getBlob,
+  checkedArtworkIds = NO_CHECKED_IDS,
+  onCheckedChange = () => {},
+  onRevealInspector,
+  onDuplicateArtworks,
+  onRemoveArtworksFromChecklist,
+  onSelectOnCanvas,
+  onNewArtwork,
+  onExpand
 }: {
   project: Project;
   libraryArtworks: Artwork[];
@@ -98,6 +111,17 @@ export function ChecklistPanel({
   onRemovePlacement: (wallObjectId: string) => Promise<void>;
   onSelectArtwork: (artworkId: string) => void;
   getBlob: (key: string) => Promise<Blob>;
+  // Multi-select (checkbox) state lives with the parent so the bulk dialogs
+  // and the checklist editor can share it.
+  checkedArtworkIds?: Set<string>;
+  onCheckedChange?: (next: Set<string>) => void;
+  // Bulk editing happens in the inspector; this only reveals it when collapsed.
+  onRevealInspector?: () => void;
+  onDuplicateArtworks?: (ids: string[]) => void;
+  onRemoveArtworksFromChecklist?: (ids: string[]) => void;
+  onSelectOnCanvas?: (ids: string[]) => void;
+  onNewArtwork?: () => void;
+  onExpand?: () => void;
 }) {
   const [isDropActive, setIsDropActive] = useState(false);
   const [filter, setFilter] = useState<ChecklistFilter>("all");
@@ -241,11 +265,41 @@ export function ChecklistPanel({
     }
     setIsSearchOpen(false);
   };
+  const checkedIds = [...checkedArtworkIds];
   const renderedRows = groupByArtist
     ? artistGroups.flatMap((group) =>
         searchIsActive || !collapsedArtistKeys.has(group.key) ? group.rows : []
       )
     : visibleRows;
+
+  const renderedIdSet = new Set(renderedRows.map((row) => row.artworkId));
+  // Shift-click range anchor: the last row whose checkbox was toggled.
+  const anchorRef = useRef<string | null>(null);
+  const toggleChecked = (artworkId: string, shift: boolean) => {
+    const next = new Set(checkedArtworkIds);
+    const anchorId = anchorRef.current;
+    const anchorIndex =
+      shift && anchorId !== null
+        ? renderedRows.findIndex((row) => row.artworkId === anchorId)
+        : -1;
+    const targetIndex = renderedRows.findIndex((row) => row.artworkId === artworkId);
+    if (anchorIndex >= 0 && targetIndex >= 0) {
+      const makeChecked = !checkedArtworkIds.has(artworkId);
+      const [from, to] =
+        anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+      for (let i = from; i <= to; i += 1) {
+        const id = renderedRows[i].artworkId;
+        if (makeChecked) next.add(id);
+        else next.delete(id);
+      }
+    } else if (next.has(artworkId)) {
+      next.delete(artworkId);
+    } else {
+      next.add(artworkId);
+    }
+    anchorRef.current = artworkId;
+    onCheckedChange(next);
+  };
 
   useEffect(() => {
     if (isSearchOpen) searchInputRef.current?.focus();
@@ -400,7 +454,20 @@ export function ChecklistPanel({
         setConfirmingRemoveArtworkId(null);
         void onRemoveArtworkFromChecklist(row.artworkId);
       }}
-      onSelect={() => onSelectArtwork(row.artworkId)}
+      // Selection mode: while anything is checked, a row click toggles its
+      // check rather than selecting the work, so the inspector stays on the
+      // checked works until Esc, Clear, or a canvas click ends it.
+      onSelect={() =>
+        checkedArtworkIds.size > 0
+          ? toggleChecked(row.artworkId, false)
+          : onSelectArtwork(row.artworkId)
+      }
+      isChecked={checkedArtworkIds.has(row.artworkId)}
+      showCheckbox={checkedArtworkIds.size > 0}
+      onToggleChecked={(shift) => toggleChecked(row.artworkId, shift)}
+      onDuplicate={
+        onDuplicateArtworks ? () => onDuplicateArtworks([row.artworkId]) : undefined
+      }
       onDragStateChange={onArtworkDragStateChange}
     />
   );
@@ -410,6 +477,16 @@ export function ChecklistPanel({
       ref={sectionRef}
       aria-label="Checklist"
       className={isDropActive ? "checklist-panel drop-active" : "checklist-panel"}
+      onKeyDown={(event) => {
+        if (
+          event.key === "Escape" &&
+          !event.defaultPrevented &&
+          checkedArtworkIds.size > 0 &&
+          confirmingRemoveArtworkId === null
+        ) {
+          onCheckedChange(new Set());
+        }
+      }}
       onDragEnter={(event) => {
         event.preventDefault();
         dragDepthRef.current += 1;
@@ -440,6 +517,23 @@ export function ChecklistPanel({
           </span>
           {intakeState === "processing" ? (
             <span className="intake-note">Adding…</span>
+          ) : null}
+          {onExpand ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label="Open checklist editor"
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={onExpand}
+                >
+                  <ArrowsOutSimpleIcon aria-hidden="true" size={14} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className="toolbar-tooltip" side="bottom">
+                Open checklist editor
+              </TooltipContent>
+            </Tooltip>
           ) : null}
         </div>
       </div>
@@ -477,7 +571,31 @@ export function ChecklistPanel({
         </div>
       ) : null}
 
-      {rows.length > 0 ? (
+      {rows.length > 0 && checkedArtworkIds.size > 0 ? (
+        <ArtworkBulkBar
+          scope="checklist"
+          variant="compact"
+          checkedCount={checkedArtworkIds.size}
+          hiddenCount={checkedIds.filter((id) => !renderedIdSet.has(id)).length}
+          allVisibleChecked={
+            renderedRows.length > 0 &&
+            renderedRows.every((row) => checkedArtworkIds.has(row.artworkId))
+          }
+          placedCheckedCount={
+            rows.filter((row) => row.isPlaced && checkedArtworkIds.has(row.artworkId)).length
+          }
+          onSelectAll={() =>
+            onCheckedChange(
+              new Set([...checkedArtworkIds, ...renderedRows.map((row) => row.artworkId)])
+            )
+          }
+          onEdit={onRevealInspector}
+          onDuplicate={() => onDuplicateArtworks?.(checkedIds)}
+          onSelectOnCanvas={() => onSelectOnCanvas?.(checkedIds)}
+          onRemove={() => onRemoveArtworksFromChecklist?.(checkedIds)}
+          onClear={() => onCheckedChange(new Set())}
+        />
+      ) : rows.length > 0 ? (
         <div className="checklist-controls" data-search-open={isSearchOpen ? "" : undefined}>
           <SegmentedToggleGroup
             aria-label="Filter checklist"
@@ -730,6 +848,12 @@ export function ChecklistPanel({
               <PlusIcon aria-hidden="true" size={16} />
               Add images…
             </DropdownMenuItem>
+            {onNewArtwork ? (
+              <DropdownMenuItem onSelect={() => onNewArtwork()}>
+                <RectangleIcon aria-hidden="true" size={16} />
+                New work without image…
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem onSelect={onOpenImportWizard}>
               <FileArrowUpIcon aria-hidden="true" size={16} />
               Bulk import…
