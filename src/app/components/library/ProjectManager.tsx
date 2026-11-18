@@ -1,4 +1,4 @@
-import { type ReactElement, useEffect, useState } from "react";
+import { type ComponentProps, type ReactElement, useEffect, useState } from "react";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
 import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
@@ -23,10 +23,20 @@ import type {
 import type { CloudProjectsStatus } from "../../store/cloudProjectsSlice";
 import { pluralize } from "../shared/pluralize";
 import { Button } from "../ui/button";
-import { CloudStorageDialog } from "./CloudStorageDialog";
+import { DeferredDialog, deferredModule } from "../shared/DeferredDialog";
+import type { CloudStorageDialog } from "./CloudStorageDialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
+
+// Its own chunk, fetched when "Manage storage" is first used (warmed on
+// hover/focus of that button), not with the project manager.
+const cloudStorageDialogModule = deferredModule<ComponentProps<typeof CloudStorageDialog>>(() =>
+  import("./CloudStorageDialog").then((module) => module.CloudStorageDialog)
+);
+const preloadCloudStorageDialog = () => {
+  cloudStorageDialogModule.preload().catch(() => {});
+};
 
 // The project switcher's list role, upgraded from a caret dropdown into a
 // modal: same open/rename/delete verbs as before, plus per-project counts and
@@ -444,10 +454,16 @@ export function ProjectManager({
           />
         ) : null}
 
-        <CloudStorageDialog
-          localProjects={summaries?.map((summary) => ({ id: summary.id, title: summary.title })) ?? null}
+        <DeferredDialog
+          className="cloud-storage-dialog"
+          module={cloudStorageDialogModule}
           open={storageOpen}
+          title="Dropbox storage"
           onOpenChange={setStorageOpen}
+          props={{
+            localProjects:
+              summaries?.map((summary) => ({ id: summary.id, title: summary.title })) ?? null
+          }}
         />
       </DialogContent>
     </Dialog>
@@ -512,6 +528,8 @@ function CloudProjectsSection({
               size="sm"
               variant="ghost"
               onClick={onManageStorage}
+              onFocus={preloadCloudStorageDialog}
+              onPointerEnter={preloadCloudStorageDialog}
             >
               Manage storage
             </Button>
