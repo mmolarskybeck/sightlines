@@ -1811,6 +1811,34 @@ fieldset.export-checklist-body:disabled {
   max-height: min(680px, calc(100dvh - 32px));
 }
 
+/* Loading / failed-to-load shell for a dialog whose code is fetched on first
+   open (DeferredDialog). Takes the real dialog's class for its width. */
+.deferred-dialog-state {
+  display: grid;
+  gap: var(--space-12);
+  margin: 0;
+  padding: var(--space-8) var(--space-24) var(--space-24);
+  color: var(--muted);
+  font-size: var(--type-sm);
+  line-height: var(--leading-copy);
+}
+
+p.deferred-dialog-state {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.deferred-dialog-state p {
+  margin: 0;
+}
+
+.deferred-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-8);
+}
+
 .cloud-storage-updating {
   color: var(--subtle);
   font-size: var(--type-xs);

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ComponentProps } from "react";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import type { ProjectSummary } from "../../../domain/project";
 import type {
@@ -9,7 +9,17 @@ import type {
 import type { CloudProjectsStatus } from "../../store/cloudProjectsSlice";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
-import { ProjectManager } from "./ProjectManager";
+import { DeferredDialog, deferredModule } from "../shared/DeferredDialog";
+import type { ProjectManager } from "./ProjectManager";
+
+// Out of the entry chunk: fetched on first open (warmed on hover/focus of the
+// caret), since most sessions never open the project manager.
+const projectManagerModule = deferredModule<ComponentProps<typeof ProjectManager>>(() =>
+  import("./ProjectManager").then((module) => module.ProjectManager)
+);
+const preloadProjectManager = () => {
+  projectManagerModule.preload().catch(() => {});
+};
 
 // Topbar project caret opens the project manager modal.
 export function ProjectPicker({
@@ -63,6 +73,8 @@ export function ProjectPicker({
             size="icon"
             variant="ghost"
             onClick={() => setIsOpen(true)}
+            onFocus={preloadProjectManager}
+            onPointerEnter={preloadProjectManager}
           >
             <CaretDownIcon aria-hidden="true" size={18} />
           </Button>
@@ -72,27 +84,32 @@ export function ProjectPicker({
         </TooltipContent>
       </Tooltip>
 
-      <ProjectManager
-        cloudBackupConfigured={cloudBackupConfigured}
-        cloudBackupProviderStatus={cloudBackupProviderStatus}
-        cloudProjectOpening={cloudProjectOpening}
-        cloudProjects={cloudProjects}
-        cloudProjectsStatus={cloudProjectsStatus}
-        cloudSyncHeads={cloudSyncHeads}
-        currentProjectId={currentProjectId}
-        listProjectSummaries={listProjectSummaries}
+      <DeferredDialog
+        className="project-manager-dialog"
+        module={projectManagerModule}
         open={isOpen}
-        onCreateProject={onCreateProject}
-        onDeleteProject={onDeleteProject}
-        onDuplicateProject={onDuplicateProject}
-        onExportProject={onExportProject}
+        title="Projects"
         onOpenChange={setIsOpen}
-        onOpenCloudProject={onOpenCloudProject}
-        onOpenProject={onOpenProject}
-        onOpenSyncedCloudProject={onOpenSyncedCloudProject}
-        onReconnectCloudBackup={onReconnectCloudBackup}
-        onRefreshCloudProjects={onRefreshCloudProjects}
-        onRenameProject={onRenameProject}
+        props={{
+          cloudBackupConfigured,
+          cloudBackupProviderStatus,
+          cloudProjectOpening,
+          cloudProjects,
+          cloudProjectsStatus,
+          cloudSyncHeads,
+          currentProjectId,
+          listProjectSummaries,
+          onCreateProject,
+          onDeleteProject,
+          onDuplicateProject,
+          onExportProject,
+          onOpenCloudProject,
+          onOpenProject,
+          onOpenSyncedCloudProject,
+          onReconnectCloudBackup,
+          onRefreshCloudProjects,
+          onRenameProject
+        }}
       />
     </>
   );

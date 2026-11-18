@@ -6,6 +6,7 @@ import { Readable } from "node:stream";
 import type { Plugin } from "vite";
 import { DROPBOX_SHARE_PROXY_PATH } from "./src/app/cloud/dropboxShare";
 import { handleDropboxShareRequest } from "./worker/index";
+import { phosphorWeightsPlugin } from "./src/bundling/phosphorWeights";
 
 // Production routes shared-package downloads through the Cloudflare Worker.
 // Vite does not execute that Worker by default, so bridge the same handler into
@@ -58,7 +59,7 @@ export default defineConfig({
   // Concurrent dev servers with different env (the e2e storage server) need
   // their own optimizer cache, or each re-optimize 504s the other's deps.
   cacheDir: process.env.SIGHTLINES_VITE_CACHE_DIR || undefined,
-  plugins: [react(), tailwindcss(), dropboxShareDevRelay()],
+  plugins: [phosphorWeightsPlugin(), react(), tailwindcss(), dropboxShareDevRelay()],
   resolve: {
     // stats-gl (via drei) nests its own three@0.170.0; force everything onto
     // the root copy so tests and the app never load two Three.js instances.
@@ -84,8 +85,9 @@ export default defineConfig({
             return "fontkit";
           }
           // The PDF stack is reachable only through the dynamic import in
-          // handleExportPdf.
-          if (/node_modules\/(pdf-lib|@pdf-lib)\//.test(id)) {
+          // handleExportPdf. pako is pdf-lib's (and fontkit's) deflate; left to
+          // the catch-all below it landed in the eager vendor chunk (~46 kB).
+          if (/node_modules\/(pdf-lib|@pdf-lib|pako)\//.test(id)) {
             return "pdf";
           }
           // SheetJS is only reached through the dynamic import in
